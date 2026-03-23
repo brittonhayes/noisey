@@ -5,6 +5,10 @@ edition = "2021"
 description = "An IoT ambient noise machine with web-based remote control"
 license = "MIT"
 
+[features]
+default = []
+eink = []
+
 [dependencies]
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }

@@ -1,9 +1,13 @@
 mod audio;
+#[cfg(feature = "eink")]
+mod display;
 mod noise;
 mod server;
 mod state;
 
 use crate::audio::{scan_sound_files, spawn_audio_thread};
+#[cfg(feature = "eink")]
+use crate::display::{spawn_display_thread, DisplayConfig};
 use crate::server::{create_router, SharedState};
 use crate::state::{AppState, AudioCommand, SoundCategory, SoundEntry};
 use clap::Parser;
@@ -28,6 +32,14 @@ struct Args {
     /// Directory containing sound files (.wav, .ogg)
     #[arg(long, default_value = "./sounds")]
     sounds_dir: PathBuf,
+
+    /// Enable e-ink display output (requires --features eink)
+    #[arg(long, default_value = "false")]
+    eink: bool,
+
+    /// E-ink display refresh interval in seconds
+    #[arg(long, default_value = "30")]
+    eink_refresh: u64,
 }
 
 #[tokio::main]
@@ -105,6 +117,17 @@ async fn main() {
     tokio::spawn(async move {
         sleep_timer_task(timer_state).await;
     });
+
+    // Start e-ink display if enabled
+    #[cfg(feature = "eink")]
+    if args.eink {
+        let display_config = DisplayConfig {
+            refresh_secs: args.eink_refresh,
+            ..DisplayConfig::default()
+        };
+        spawn_display_thread(state.clone(), display_config);
+        info!("E-ink display enabled");
+    }
 
     // Start web server
     let addr: SocketAddr = format!("{}:{}", args.host, args.port)

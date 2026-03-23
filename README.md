@@ -11,6 +11,8 @@ A Rust-based IoT ambient noise machine with web-based remote control. Designed t
 - **Mobile-first web UI** — Control everything from your phone's browser
 - **Single binary** — Static assets embedded, no external files needed
 
+- **E-ink display** — Optional status display for a dedicated hardware build ([build guide](docs/BUILD.md))
+
 ## Quick Start
 
 ```bash
@@ -75,6 +77,22 @@ sudo systemctl enable --now noisey
 ```bash
 sudo apt install libasound2-dev
 ```
+
+## E-ink Display
+
+Build noisey into a dedicated sleep device with a Waveshare e-ink display. The screen shows active sounds, volume, and sleep timer — no phone needed to see status at a glance.
+
+```bash
+# Build with e-ink support
+cargo build --release --features eink
+
+# Run with display enabled
+./target/release/noisey --eink --eink-refresh 30
+```
+
+When hardware isn't available (development), the display output is written to `/tmp/noisey-display.txt`.
+
+See the full **[hardware build guide](docs/BUILD.md)** for parts list, wiring, enclosure design, and assembly instructions.
 
 ## API
 
