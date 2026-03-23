@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#000000">
+    <title>Noisey</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-row">
+                <h1>noisey</h1>
+                <div class="connection-dot" id="connection-dot" title="Connected"></div>
+            </div>
+            <div class="master-volume">
+                <label>Master</label>
+                <input type="range" min="0" max="100" value="80" id="master-volume">
+                <span class="volume-value" id="master-volume-value">80%</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="sounds-grid" id="sounds-grid">
+                <!-- Sound cards injected by JS -->
+            </section>
+        </main>
+
+        <footer>
+            <div class="timer-section">
+                <div class="timer-label">Sleep Timer</div>
+                <div class="timer-presets" id="timer-presets">
+                    <button data-minutes="15">15m</button>
+                    <button data-minutes="30">30m</button>
+                    <button data-minutes="60">1h</button>
+                    <button data-minutes="120">2h</button>
+                    <button data-minutes="240">4h</button>
+                    <button data-minutes="480">8h</button>
+                </div>
+                <div class="timer-status" id="timer-status"></div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

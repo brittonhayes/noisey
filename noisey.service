@@ -1,0 +1,16 @@
+[Unit]
+Description=Noisey - Ambient Sound Machine
+After=sound.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/noisey --sounds-dir /home/pi/sounds
+Restart=always
+RestartSec=5
+User=pi
+Group=audio
+Environment=RUST_LOG=noisey=info
+
+[Install]
+WantedBy=multi-user.target
