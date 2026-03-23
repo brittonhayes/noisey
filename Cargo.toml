@@ -1,0 +1,20 @@
+[package]
+name = "noisey"
+version = "0.1.0"
+edition = "2021"
+description = "An IoT ambient noise machine with web-based remote control"
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+rand = { version = "0.8", features = ["small_rng"] }
+rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+rust-embed = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+mime_guess = "2"

@@ -1,0 +1,355 @@
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg: #000000;
+    --card: #111111;
+    --card-active: #18181b;
+    --border: #222222;
+    --border-active: #333333;
+    --text-primary: #ededed;
+    --text-secondary: #888888;
+    --text-muted: #555555;
+    --accent: #0070f3;
+    --accent-hover: #0060df;
+    --success: #00c853;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+}
+
+html {
+    font-size: 16px;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text-primary);
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+    max-width: 640px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 0 16px;
+}
+
+/* Header */
+header {
+    padding: 24px 0 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+}
+
+.connection-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    transition: background 0.3s;
+}
+
+.connection-dot.disconnected {
+    background: #ef4444;
+}
+
+.master-volume {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.master-volume label {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    min-width: 48px;
+}
+
+.volume-value {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    min-width: 36px;
+    text-align: right;
+}
+
+/* Range inputs */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    border: none;
+    cursor: pointer;
+}
+
+/* Main sounds grid */
+main {
+    flex: 1;
+    padding: 20px 0;
+}
+
+.sounds-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+/* Sound card */
+.sound-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    transition: all 0.2s;
+}
+
+.sound-card.active {
+    background: var(--card-active);
+    border-color: var(--border-active);
+}
+
+.sound-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.sound-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sound-icon {
+    font-size: 1.125rem;
+    width: 28px;
+    text-align: center;
+    opacity: 0.6;
+}
+
+.sound-card.active .sound-icon {
+    opacity: 1;
+}
+
+.sound-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.sound-category {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 1px;
+}
+
+/* Toggle switch */
+.toggle {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--border);
+    border-radius: 11px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background: var(--text-secondary);
+    border-radius: 50%;
+    transition: all 0.2s;
+}
+
+.toggle input:checked + .toggle-slider {
+    background: var(--accent);
+}
+
+.toggle input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+    background: white;
+}
+
+/* Volume slider in sound card */
+.sound-volume {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    animation: fadeIn 0.15s ease;
+}
+
+.sound-volume label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 32px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Footer / Timer */
+footer {
+    padding: 16px 0 24px;
+    border-top: 1px solid var(--border);
+}
+
+.timer-section {
+    text-align: center;
+}
+
+.timer-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+}
+
+.timer-presets {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.timer-presets button {
+    background: var(--card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.timer-presets button:hover {
+    border-color: var(--border-active);
+    color: var(--text-primary);
+}
+
+.timer-presets button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.timer-status {
+    margin-top: 10px;
+    font-size: 0.875rem;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    min-height: 1.5em;
+}
+
+.timer-status .cancel-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    margin-left: 8px;
+    text-decoration: underline;
+}
+
+.timer-status .cancel-btn:hover {
+    color: var(--text-secondary);
+}
+
+/* Responsive tweaks */
+@media (min-width: 480px) {
+    .sounds-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (min-width: 640px) {
+    #app {
+        padding: 0 24px;
+    }
+}
