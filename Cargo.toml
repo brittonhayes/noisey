@@ -13,7 +13,9 @@ eink = []
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 rand = { version = "0.8", features = ["small_rng"] }
-rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis"] }
+miniaudio = { git = "https://github.com/ExPixel/miniaudio-rs", default-features = false, features = ["ma-log-level-error"] }
+hound = "3"
+lewton = "0.10"
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
