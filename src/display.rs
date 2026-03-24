@@ -1,7 +1,9 @@
 use crate::server::SharedState;
-use std::fmt::Write as FmtWrite;
-use std::time::Instant;
 use tracing::{error, info, warn};
+
+/// Default e-ink display dimensions (Waveshare 2.9")
+pub const EINK_WIDTH: u32 = 296;
+pub const EINK_HEIGHT: u32 = 128;
 
 /// Display configuration for e-ink hardware.
 #[derive(Debug, Clone)]
@@ -44,7 +46,7 @@ pub async fn render_status(state: &SharedState) -> DisplayFrame {
     // Header
     lines.push(String::new());
     lines.push("  noisey".to_string());
-    lines.push(format!("  ─────────────────────────"));
+    lines.push("  ─────────────────────────".to_string());
 
     // Active sounds
     let active_sounds: Vec<_> = status.sounds.iter().filter(|s| s.active).collect();
@@ -102,41 +104,115 @@ impl DisplayFrame {
     /// Returns (width, height, buffer) where buffer is packed bits,
     /// MSB first, row-major order.
     pub fn to_bitmap(&self, width: u32, height: u32) -> Vec<u8> {
-        let mut buf = vec![0xFFu8; ((width * height + 7) / 8) as usize];
+        let mut buf = vec![0xFFu8; (width * height).div_ceil(8) as usize];
+        render_into_bitmap(&mut buf, width, height, &self.lines);
+        buf
+    }
 
-        let char_w = 6u32; // 5px char + 1px spacing
-        let char_h = 9u32; // 7px char + 2px line spacing
-        let margin_top = 8u32;
+    /// Render to a 1-bit BMP file (black and white only).
+    /// Returns the raw bytes of a valid .bmp file you can open in any image viewer.
+    /// This is the exact pixel-for-pixel representation of what the e-ink display shows.
+    pub fn to_bmp(&self, width: u32, height: u32) -> Vec<u8> {
+        // BMP row stride: each row padded to 4-byte boundary (1 bit per pixel)
+        let row_stride = width.div_ceil(32) * 4;
+        let pixel_data_size = row_stride * height;
+        let header_size: u32 = 14 + 40 + 8; // file header + DIB header + 2-color palette
+        let file_size = header_size + pixel_data_size;
 
-        for (row, line) in self.lines.iter().enumerate() {
-            let y_origin = margin_top + row as u32 * char_h;
-            if y_origin + 7 > height {
+        let mut bmp = Vec::with_capacity(file_size as usize);
+
+        // -- BMP File Header (14 bytes) --
+        bmp.extend_from_slice(b"BM");
+        bmp.extend_from_slice(&file_size.to_le_bytes());
+        bmp.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        bmp.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        bmp.extend_from_slice(&header_size.to_le_bytes()); // pixel data offset
+
+        // -- BITMAPINFOHEADER (40 bytes) --
+        bmp.extend_from_slice(&40u32.to_le_bytes()); // header size
+        bmp.extend_from_slice(&(width as i32).to_le_bytes());
+        bmp.extend_from_slice(&(height as i32).to_le_bytes());
+        bmp.extend_from_slice(&1u16.to_le_bytes()); // color planes
+        bmp.extend_from_slice(&1u16.to_le_bytes()); // bits per pixel
+        bmp.extend_from_slice(&0u32.to_le_bytes()); // no compression
+        bmp.extend_from_slice(&pixel_data_size.to_le_bytes());
+        bmp.extend_from_slice(&2835u32.to_le_bytes()); // h pixels/meter (~72 DPI)
+        bmp.extend_from_slice(&2835u32.to_le_bytes()); // v pixels/meter
+        bmp.extend_from_slice(&2u32.to_le_bytes()); // colors in palette
+        bmp.extend_from_slice(&0u32.to_le_bytes()); // important colors
+
+        // -- Color Table (8 bytes: 2 entries × 4 bytes BGRA) --
+        // Index 0 = black (for set bits in our convention, but BMP 1-bit:
+        // palette[0] maps to 0-bits, palette[1] maps to 1-bits)
+        // Our bitmap: 1 = white, 0 = black. So palette[0] = black, palette[1] = white.
+        bmp.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // palette[0] = black
+        bmp.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0x00]); // palette[1] = white
+
+        // -- Pixel Data --
+        // Render into our raw bitmap first
+        let raw = self.to_bitmap(width, height);
+
+        // BMP stores rows bottom-to-top
+        let mut pixel_data = vec![0xFFu8; (row_stride * height) as usize];
+        for y in 0..height {
+            let bmp_row = (height - 1 - y) as usize;
+            let dst_offset = bmp_row * row_stride as usize;
+            let src_bit_offset = y * width;
+
+            for x in 0..width {
+                let src_bit = src_bit_offset + x;
+                let src_byte = (src_bit / 8) as usize;
+                let src_shift = 7 - (src_bit % 8);
+                let pixel = (raw[src_byte] >> src_shift) & 1;
+
+                let dst_byte = dst_offset + (x / 8) as usize;
+                let dst_shift = 7 - (x % 8);
+                if pixel == 0 {
+                    // black pixel: clear bit
+                    pixel_data[dst_byte] &= !(1 << dst_shift);
+                }
+                // white pixel: bit already set (0xFF init)
+            }
+        }
+
+        bmp.extend_from_slice(&pixel_data);
+        bmp
+    }
+}
+
+/// Render text lines into a 1-bit packed bitmap buffer.
+/// Buffer must be pre-filled with 0xFF (white). Black pixels are cleared.
+fn render_into_bitmap(buf: &mut [u8], width: u32, height: u32, lines: &[String]) {
+    let char_w = 6u32; // 5px char + 1px spacing
+    let char_h = 9u32; // 7px char + 2px line spacing
+    let margin_top = 8u32;
+
+    for (row, line) in lines.iter().enumerate() {
+        let y_origin = margin_top + row as u32 * char_h;
+        if y_origin + 7 > height {
+            break;
+        }
+        for (col, ch) in line.chars().enumerate() {
+            let x_origin = col as u32 * char_w;
+            if x_origin + 5 > width {
                 break;
             }
-            for (col, ch) in line.chars().enumerate() {
-                let x_origin = col as u32 * char_w;
-                if x_origin + 5 > width {
-                    break;
-                }
-                let glyph = font_glyph(ch);
-                for gy in 0..7u32 {
-                    for gx in 0..5u32 {
-                        if glyph[gy as usize] & (1 << (4 - gx)) != 0 {
-                            let px = x_origin + gx;
-                            let py = y_origin + gy;
-                            let bit_idx = py * width + px;
-                            let byte_idx = (bit_idx / 8) as usize;
-                            let bit_pos = 7 - (bit_idx % 8);
-                            if byte_idx < buf.len() {
-                                buf[byte_idx] &= !(1 << bit_pos); // set black
-                            }
+            let glyph = font_glyph(ch);
+            for gy in 0..7u32 {
+                for gx in 0..5u32 {
+                    if glyph[gy as usize] & (1 << (4 - gx)) != 0 {
+                        let px = x_origin + gx;
+                        let py = y_origin + gy;
+                        let bit_idx = py * width + px;
+                        let byte_idx = (bit_idx / 8) as usize;
+                        let bit_pos = 7 - (bit_idx % 8);
+                        if byte_idx < buf.len() {
+                            buf[byte_idx] &= !(1 << bit_pos); // set black
                         }
                     }
                 }
             }
         }
-
-        buf
     }
 }
 
@@ -195,9 +271,15 @@ pub fn spawn_display_thread(state: SharedState, config: DisplayConfig) {
                     Err(e) => error!("E-ink display update failed: {e}"),
                 }
             } else {
-                // Fallback: write to file for development
+                // Fallback: write text + BMP preview for development
                 if let Err(e) = std::fs::write("/tmp/noisey-display.txt", &text) {
                     error!("Failed to write display output: {e}");
+                }
+                let bmp = frame.to_bmp(EINK_WIDTH, EINK_HEIGHT);
+                if let Err(e) = std::fs::write("/tmp/noisey-display.bmp", &bmp) {
+                    error!("Failed to write display BMP: {e}");
+                } else {
+                    info!("Display preview written to /tmp/noisey-display.bmp");
                 }
             }
         }
@@ -255,8 +337,8 @@ impl EinkHardware {
 
         // Hardware reset
         let hw = Self {
-            width: 296,
-            height: 128,
+            width: EINK_WIDTH,
+            height: EINK_HEIGHT,
             spi_path: config.spi_device.clone(),
             dc_pin: config.dc_pin,
             rst_pin: config.rst_pin,
@@ -520,5 +602,51 @@ mod tests {
     fn test_font_glyph_space_is_blank() {
         let glyph = font_glyph(' ');
         assert!(glyph.iter().all(|&row| row == 0));
+    }
+
+    #[test]
+    fn test_bmp_is_valid() {
+        let frame = DisplayFrame {
+            lines: vec!["  noisey".to_string(), "  vol 50%".to_string()],
+        };
+        let bmp = frame.to_bmp(EINK_WIDTH, EINK_HEIGHT);
+
+        // Check BMP magic bytes
+        assert_eq!(&bmp[0..2], b"BM");
+
+        // Check bits per pixel = 1
+        let bpp = u16::from_le_bytes([bmp[28], bmp[29]]);
+        assert_eq!(bpp, 1);
+
+        // Check dimensions
+        let w = i32::from_le_bytes([bmp[18], bmp[19], bmp[20], bmp[21]]);
+        let h = i32::from_le_bytes([bmp[22], bmp[23], bmp[24], bmp[25]]);
+        assert_eq!(w, EINK_WIDTH as i32);
+        assert_eq!(h, EINK_HEIGHT as i32);
+
+        // Check file size matches actual data
+        let file_size = u32::from_le_bytes([bmp[2], bmp[3], bmp[4], bmp[5]]);
+        assert_eq!(file_size as usize, bmp.len());
+
+        // Palette: index 0 should be black, index 1 should be white
+        let palette_offset = 14 + 40; // after file header + DIB header
+        assert_eq!(&bmp[palette_offset..palette_offset + 3], &[0, 0, 0]); // black
+        assert_eq!(
+            &bmp[palette_offset + 4..palette_offset + 7],
+            &[0xFF, 0xFF, 0xFF]
+        ); // white
+    }
+
+    #[test]
+    fn test_bmp_has_black_pixels() {
+        let frame = DisplayFrame {
+            lines: vec!["test".to_string()],
+        };
+        let bmp = frame.to_bmp(EINK_WIDTH, EINK_HEIGHT);
+        let data_offset = u32::from_le_bytes([bmp[10], bmp[11], bmp[12], bmp[13]]) as usize;
+        let pixel_data = &bmp[data_offset..];
+
+        // Not all white — some text was rendered as black pixels (cleared bits)
+        assert!(pixel_data.iter().any(|&b| b != 0xFF));
     }
 }
