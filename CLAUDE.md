@@ -7,8 +7,8 @@ Noisey is a Rust-based IoT ambient noise machine with a web UI and optional e-in
 ## Build Prerequisites
 
 ```bash
-# Required system library (ALSA audio)
-sudo apt install libasound2-dev
+# No system audio libraries required!
+# The miniaudio backend bundles its C source and loads ALSA via dlopen at runtime.
 
 # For cross-compiling to Raspberry Pi
 cargo install cross --git https://github.com/cross-rs/cross
@@ -60,7 +60,7 @@ cargo fmt --check
 ```
 src/
 ├── main.rs      # CLI args, state setup, sleep timer task
-├── audio.rs     # Audio engine (dedicated thread, rodio sinks)
+├── audio.rs     # Audio engine (miniaudio device, mixing callback)
 ├── noise.rs     # Procedural noise generators (white/pink/brown)
 ├── server.rs    # Axum web server, REST API, static assets
 ├── state.rs     # Shared state types, audio commands
@@ -71,8 +71,9 @@ docs/BUILD.md    # Hardware build guide for the physical device
 
 ## Key Design Decisions
 
-- Audio engine runs on a dedicated std::thread (rodio OutputStream is !Send)
+- Audio engine uses miniaudio (bundled C lib, no system deps) with a mixing callback
 - Communication with audio thread via tokio mpsc channel
+- File decoding uses hound (WAV) and lewton (OGG Vorbis) — both pure Rust
 - Static assets embedded into binary via rust-embed
 - E-ink support is behind the `eink` cargo feature flag to avoid pulling in display code on headless builds
 - Display falls back to writing `/tmp/noisey-display.txt` when SPI/GPIO hardware is unavailable

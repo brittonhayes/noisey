@@ -1,9 +1,9 @@
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use rodio::Source;
-use std::time::Duration;
 
-const SAMPLE_RATE: u32 = 44100;
+pub const SAMPLE_RATE: u32 = 44100;
+/// A trait for audio sources that produce f32 samples.
+pub trait SoundSource: Iterator<Item = f32> + Send {}
 
 // --- White Noise ---
 
@@ -27,23 +27,7 @@ impl Iterator for WhiteNoise {
     }
 }
 
-impl Source for WhiteNoise {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        SAMPLE_RATE
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
-}
+impl SoundSource for WhiteNoise {}
 
 // --- Pink Noise (Voss-McCartney algorithm) ---
 
@@ -90,23 +74,7 @@ impl Iterator for PinkNoise {
     }
 }
 
-impl Source for PinkNoise {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        SAMPLE_RATE
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
-}
+impl SoundSource for PinkNoise {}
 
 // --- Brown Noise (Brownian / random walk) ---
 
@@ -134,20 +102,4 @@ impl Iterator for BrownNoise {
     }
 }
 
-impl Source for BrownNoise {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        SAMPLE_RATE
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
-}
+impl SoundSource for BrownNoise {}
