@@ -21,14 +21,19 @@ struct StaticAssets;
 pub type SharedState = Arc<RwLock<AppState>>;
 
 pub fn create_router(state: SharedState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/", get(index_handler))
         .route("/api/sounds", get(list_sounds))
         .route("/api/sounds/{id}/toggle", post(toggle_sound))
         .route("/api/sounds/{id}/volume", post(set_sound_volume))
         .route("/api/master-volume", post(set_master_volume))
         .route("/api/sleep-timer", post(set_sleep_timer))
-        .route("/api/status", get(get_status))
+        .route("/api/status", get(get_status));
+
+    #[cfg(feature = "eink")]
+    let router = router.route("/api/display/preview", get(display_preview));
+
+    router
         .route("/{*path}", get(static_handler))
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -168,4 +173,21 @@ async fn set_sleep_timer(
     }
 
     Json(state.status())
+}
+
+/// Serve a live 1-bit BMP preview of the e-ink display.
+/// Hit /api/display/preview in your browser to see exactly what the e-ink screen renders.
+#[cfg(feature = "eink")]
+async fn display_preview(State(state): State<SharedState>) -> impl IntoResponse {
+    use crate::display::{render_status, EINK_HEIGHT, EINK_WIDTH};
+
+    let frame = render_status(&state).await;
+    let bmp = frame.to_bmp(EINK_WIDTH, EINK_HEIGHT);
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, "image/bmp")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(axum::body::Body::from(bmp))
+        .unwrap()
+        .into_response()
 }
