@@ -91,41 +91,41 @@ async fn main() {
     let args = Args::parse();
 
     // Build sound catalog
+    let builtin = |id: &str, name: &str| SoundEntry {
+        id: id.into(),
+        name: name.into(),
+        category: SoundCategory::Nature,
+        active: false,
+        description: None,
+        recorded_at: None,
+        duration_secs: None,
+    };
+
     let mut sounds: Vec<SoundEntry> = vec![
-        SoundEntry {
-            id: "ocean-surf".into(),
-            name: "Ocean Surf".into(),
-            category: SoundCategory::Nature,
-            active: false,
-        },
-        SoundEntry {
-            id: "warm-rain".into(),
-            name: "Warm Rain".into(),
-            category: SoundCategory::Nature,
-            active: false,
-        },
-        SoundEntry {
-            id: "creek".into(),
-            name: "Creek".into(),
-            category: SoundCategory::Nature,
-            active: false,
-        },
-        SoundEntry {
-            id: "night-wind".into(),
-            name: "Night Wind".into(),
-            category: SoundCategory::Nature,
-            active: false,
-        },
+        builtin("ocean-surf", "Ocean Surf"),
+        builtin("warm-rain", "Warm Rain"),
+        builtin("creek", "Creek"),
+        builtin("night-wind", "Night Wind"),
     ];
 
     // Scan for user-provided sound files
     let file_sounds = scan_sound_files(&args.sounds_dir);
     for (id, name) in file_sounds {
+        // Check for sidecar metadata
+        let meta_path = args.sounds_dir.join(format!("{id}.json"));
+        let meta: Option<crate::state::SoundMeta> = std::fs::read_to_string(&meta_path)
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok());
+
+        let display_name = meta.as_ref().map(|m| m.name.clone()).unwrap_or(name);
         sounds.push(SoundEntry {
             id,
-            name,
+            name: display_name,
             category: SoundCategory::Custom,
             active: false,
+            description: meta.as_ref().and_then(|m| m.description.clone()),
+            recorded_at: meta.as_ref().and_then(|m| m.recorded_at.clone()),
+            duration_secs: None,
         });
     }
 
@@ -168,6 +168,7 @@ async fn main() {
         schedule,
         audio_tx,
         simulate,
+        sounds_dir: args.sounds_dir.clone(),
     }));
 
     // Spawn sleep timer watcher

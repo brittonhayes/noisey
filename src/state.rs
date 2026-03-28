@@ -16,6 +16,12 @@ pub struct SoundEntry {
     pub name: String,
     pub category: SoundCategory,
     pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f32>,
 }
 
 pub struct SleepTimer {
@@ -38,6 +44,7 @@ pub struct AppState {
     pub schedule: Option<Schedule>,
     pub audio_tx: mpsc::Sender<AudioCommand>,
     pub simulate: bool,
+    pub sounds_dir: std::path::PathBuf,
 }
 
 #[derive(Debug)]
@@ -46,6 +53,17 @@ pub enum AudioCommand {
     Stop { id: String },
     SetMasterVolume(f32),
     StopAll,
+    InvalidateCache { id: String },
+}
+
+/// Sidecar metadata for uploaded sound memories.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoundMeta {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<String>,
 }
 
 #[derive(Serialize)]

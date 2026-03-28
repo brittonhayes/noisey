@@ -297,24 +297,43 @@ function renderSounds(sounds) {
         activeSoundId = activeSound.id;
     }
 
-    if (!soundsCreated) {
-        container.innerHTML = '';
-        sounds.forEach(sound => {
-            const pill = document.createElement('button');
-            pill.className = 'sound-pill' + (sound.active ? ' active' : '');
-            pill.id = 'pill-' + sound.id;
-            pill.type = 'button';
-            pill.textContent = sound.name;
-            pill.addEventListener('click', () => toggleSound(sound.id));
-            container.appendChild(pill);
-        });
-        soundsCreated = true;
-    } else {
-        sounds.forEach(sound => {
-            const pill = document.getElementById('pill-' + sound.id);
-            if (pill) pill.classList.toggle('active', sound.active);
-        });
-    }
+    // Always rebuild to handle dynamic adds/deletes from uploads
+    container.innerHTML = '';
+    sounds.forEach(sound => {
+        const pill = document.createElement('button');
+        pill.className = 'sound-pill' + (sound.active ? ' active' : '');
+        pill.id = 'pill-' + sound.id;
+        pill.type = 'button';
+        pill.textContent = sound.name;
+        pill.addEventListener('click', () => toggleSound(sound.id));
+
+        // Custom sounds get a delete button
+        if (sound.category === 'custom') {
+            const del = document.createElement('span');
+            del.className = 'pill-delete';
+            del.textContent = '\u00d7';
+            del.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteSound(sound.id, sound.name);
+            });
+            pill.appendChild(del);
+        }
+
+        container.appendChild(pill);
+    });
+
+    // Add the upload "+" pill at the end
+    const uploadPill = document.createElement('button');
+    uploadPill.className = 'sound-pill upload-pill';
+    uploadPill.type = 'button';
+    uploadPill.id = 'upload-pill';
+    uploadPill.textContent = '+';
+    uploadPill.addEventListener('click', () => {
+        document.getElementById('upload-file-input').click();
+    });
+    container.appendChild(uploadPill);
+
+    soundsCreated = true;
 }
 
 async function toggleSound(id) {
@@ -324,6 +343,65 @@ async function toggleSound(id) {
         renderSounds(state.sounds);
     } catch (e) {
         console.error('Toggle failed:', e);
+    }
+}
+
+// ========================================
+// UPLOAD
+// ========================================
+
+document.getElementById('upload-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Prompt for a name
+    const defaultName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    const name = prompt('Name this memory:', defaultName);
+    if (name === null) {
+        e.target.value = '';
+        return;
+    }
+
+    const uploadPill = document.getElementById('upload-pill');
+    if (uploadPill) {
+        uploadPill.textContent = '...';
+        uploadPill.classList.add('uploading');
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (name.trim()) formData.append('name', name.trim());
+
+        const res = await fetch('/api/sounds/upload', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!res.ok) throw new Error('Upload failed: HTTP ' + res.status);
+
+        // Re-poll to get updated catalog
+        await poll();
+    } catch (err) {
+        console.error('Upload failed:', err);
+        alert('Upload failed. Make sure the file is a supported audio format.');
+    } finally {
+        e.target.value = '';
+        if (uploadPill) {
+            uploadPill.textContent = '+';
+            uploadPill.classList.remove('uploading');
+        }
+    }
+});
+
+async function deleteSound(id, name) {
+    if (!confirm('Remove "' + name + '"?')) return;
+    try {
+        const res = await fetch('/api/sounds/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Delete failed: HTTP ' + res.status);
+        await poll();
+    } catch (err) {
+        console.error('Delete failed:', err);
     }
 }
 
