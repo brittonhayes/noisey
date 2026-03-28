@@ -58,8 +58,7 @@ pub async fn render_status(state: &SharedState) -> DisplayFrame {
     } else {
         lines.push(String::new());
         for sound in &active_sounds {
-            let bar = volume_bar(sound.volume);
-            lines.push(format!("  {} {}", sound.name.to_lowercase(), bar));
+            lines.push(format!("  {}", sound.name.to_lowercase()));
         }
         lines.push(String::new());
     }
@@ -214,20 +213,6 @@ fn render_into_bitmap(buf: &mut [u8], width: u32, height: u32, lines: &[String])
             }
         }
     }
-}
-
-/// Generate a volume bar: ●●●●○○○○○○
-fn volume_bar(volume: f32) -> String {
-    let filled = (volume * 8.0).round() as usize;
-    let empty = 8 - filled;
-    let mut bar = String::new();
-    for _ in 0..filled {
-        bar.push('●');
-    }
-    for _ in 0..empty {
-        bar.push('○');
-    }
-    bar
 }
 
 /// Spawn the e-ink display refresh loop.
@@ -563,21 +548,6 @@ fn font_glyph(ch: char) -> [u8; 7] {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_volume_bar_empty() {
-        assert_eq!(volume_bar(0.0), "○○○○○○○○");
-    }
-
-    #[test]
-    fn test_volume_bar_full() {
-        assert_eq!(volume_bar(1.0), "●●●●●●●●");
-    }
-
-    #[test]
-    fn test_volume_bar_half() {
-        assert_eq!(volume_bar(0.5), "●●●●○○○○");
-    }
 
     #[test]
     fn test_display_frame_to_text() {

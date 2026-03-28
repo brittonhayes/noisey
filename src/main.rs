@@ -9,7 +9,8 @@ use crate::audio::{scan_sound_files, spawn_audio_thread};
 #[cfg(feature = "eink")]
 use crate::display::{spawn_display_thread, DisplayConfig};
 use crate::server::{create_router, SharedState};
-use crate::state::{AppState, AudioCommand, SoundCategory, SoundEntry};
+use crate::state::{AdaptiveConfig, AppState, AudioCommand, Schedule, SoundCategory, SoundEntry};
+use chrono::NaiveTime;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -40,6 +41,42 @@ struct Args {
     /// E-ink display refresh interval in seconds
     #[arg(long, default_value = "30")]
     eink_refresh: u64,
+
+    /// Run in simulation mode (no audio hardware required)
+    #[arg(long, default_value = "false")]
+    simulate: bool,
+}
+
+/// Path to the schedule config file.
+fn schedule_config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("noisey").join("schedule.json"))
+}
+
+/// Load a saved schedule from disk.
+fn load_schedule() -> Option<Schedule> {
+    let path = schedule_config_path()?;
+    let data = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Save the current schedule to disk.
+pub fn save_schedule(schedule: &Option<Schedule>) {
+    let Some(path) = schedule_config_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match schedule {
+        Some(s) => {
+            if let Ok(json) = serde_json::to_string_pretty(s) {
+                let _ = std::fs::write(&path, json);
+            }
+        }
+        None => {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 #[tokio::main]
@@ -56,25 +93,28 @@ async fn main() {
     // Build sound catalog
     let mut sounds: Vec<SoundEntry> = vec![
         SoundEntry {
-            id: "white-noise".into(),
-            name: "White Noise".into(),
-            category: SoundCategory::Noise,
+            id: "ocean-surf".into(),
+            name: "Ocean Surf".into(),
+            category: SoundCategory::Nature,
             active: false,
-            volume: 0.5,
         },
         SoundEntry {
-            id: "pink-noise".into(),
-            name: "Pink Noise".into(),
-            category: SoundCategory::Noise,
+            id: "warm-rain".into(),
+            name: "Warm Rain".into(),
+            category: SoundCategory::Nature,
             active: false,
-            volume: 0.5,
         },
         SoundEntry {
-            id: "brown-noise".into(),
-            name: "Brown Noise".into(),
-            category: SoundCategory::Noise,
+            id: "creek".into(),
+            name: "Creek".into(),
+            category: SoundCategory::Nature,
             active: false,
-            volume: 0.5,
+        },
+        SoundEntry {
+            id: "night-wind".into(),
+            name: "Night Wind".into(),
+            category: SoundCategory::Nature,
+            active: false,
         },
     ];
 
@@ -86,36 +126,63 @@ async fn main() {
             name,
             category: SoundCategory::Custom,
             active: false,
-            volume: 0.5,
         });
     }
 
     info!(
         "Loaded {} sounds ({} from files)",
         sounds.len(),
-        sounds.len() - 3
+        sounds.len() - 4
     );
 
     // Create audio command channel
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(64);
+
+    // Start audio engine on a dedicated thread and wait for actual mode
+    let (sim_rx, adaptive_state) =
+        spawn_audio_thread(args.sounds_dir.clone(), audio_rx, args.simulate);
+    let simulate = sim_rx.recv().unwrap_or(args.simulate);
+    info!("Audio engine started");
+
+    // Check mic availability from adaptive state
+    let mic_available = adaptive_state
+        .lock()
+        .map(|a| a.mic_available)
+        .unwrap_or(false);
+
+    // Load saved schedule
+    let schedule = load_schedule();
+    if let Some(ref s) = schedule {
+        info!(
+            "Loaded schedule: {} → {}, sound={}",
+            s.start_time, s.stop_time, s.sound_id
+        );
+    }
 
     // Shared application state
     let state: SharedState = Arc::new(RwLock::new(AppState {
         sounds,
         master_volume: 0.8,
         sleep_timer: None,
+        schedule,
+        adaptive: AdaptiveConfig {
+            mic_available,
+            ..AdaptiveConfig::default()
+        },
         audio_tx,
+        simulate,
     }));
-
-    // Start audio engine on a dedicated thread
-    // OutputStream is created there since it's not Send
-    spawn_audio_thread(args.sounds_dir.clone(), audio_rx);
-    info!("Audio engine started");
 
     // Spawn sleep timer watcher
     let timer_state = state.clone();
     tokio::spawn(async move {
         sleep_timer_task(timer_state).await;
+    });
+
+    // Spawn schedule watcher
+    let schedule_state = state.clone();
+    tokio::spawn(async move {
+        schedule_task(schedule_state).await;
     });
 
     // Start e-ink display if enabled
@@ -159,5 +226,83 @@ async fn sleep_timer_task(state: SharedState) {
                 state.sleep_timer = None;
             }
         }
+    }
+}
+
+async fn schedule_task(state: SharedState) {
+    let mut was_in_window = false;
+
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+        let mut state = state.write().await;
+        let schedule = match &state.schedule {
+            Some(s) if s.enabled => s.clone(),
+            _ => {
+                was_in_window = false;
+                continue;
+            }
+        };
+
+        let start = match NaiveTime::parse_from_str(&schedule.start_time, "%H:%M") {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let stop = match NaiveTime::parse_from_str(&schedule.stop_time, "%H:%M") {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let now = chrono::Local::now().time();
+        let in_window = if start <= stop {
+            // Same-day window: e.g. 08:00–18:00
+            now >= start && now < stop
+        } else {
+            // Overnight window: e.g. 22:00–07:00
+            now >= start || now < stop
+        };
+
+        if in_window && !was_in_window {
+            // Entering window — start playing
+            let sound_id = schedule.sound_id.clone();
+
+            // Stop any currently playing sounds first
+            let active_ids: Vec<String> = state
+                .sounds
+                .iter()
+                .filter(|s| s.active)
+                .map(|s| s.id.clone())
+                .collect();
+            for aid in &active_ids {
+                let _ = state
+                    .audio_tx
+                    .send(AudioCommand::Stop { id: aid.clone() })
+                    .await;
+            }
+            for s in state.sounds.iter_mut() {
+                s.active = false;
+            }
+
+            // Play the scheduled sound
+            let _ = state
+                .audio_tx
+                .send(AudioCommand::Play {
+                    id: sound_id.clone(),
+                })
+                .await;
+            if let Some(s) = state.sounds.iter_mut().find(|s| s.id == sound_id) {
+                s.active = true;
+            }
+            info!("Schedule: starting sound {sound_id}");
+        } else if !in_window && was_in_window {
+            // Leaving window — stop all sounds
+            let _ = state.audio_tx.send(AudioCommand::StopAll).await;
+            for s in state.sounds.iter_mut() {
+                s.active = false;
+            }
+            info!("Schedule: stopping all sounds");
+        }
+
+        was_in_window = in_window;
     }
 }

@@ -11,7 +11,9 @@ eink = []
 
 [dependencies]
 axum = "0.8"
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+dirs = "6"
 rand = { version = "0.8", features = ["small_rng"] }
 miniaudio = { git = "https://github.com/ExPixel/miniaudio-rs", default-features = false, features = ["ma-log-level-error"] }
 hound = "3"

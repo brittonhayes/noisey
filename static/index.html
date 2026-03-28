@@ -4,46 +4,108 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#000000">
-    <title>Noisey</title>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#111111">
+    <title>noisey</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+    <div class="starfield" id="starfield"></div>
+    <div class="ambient-glow" id="ambient-glow"></div>
     <div id="app">
-        <header>
-            <div class="header-row">
-                <h1>noisey</h1>
-                <div class="connection-dot" id="connection-dot" title="Connected"></div>
-            </div>
-            <div class="master-volume">
-                <label>Master</label>
-                <input type="range" min="0" max="100" value="80" id="master-volume">
-                <span class="volume-value" id="master-volume-value">80%</span>
-            </div>
-        </header>
+        <span id="sim-badge" class="sim-badge" hidden>SIM</span>
+        <div class="status-line" id="status-line"></div>
 
-        <main>
-            <section class="sounds-grid" id="sounds-grid">
-                <!-- Sound cards injected by JS -->
-            </section>
-        </main>
-
-        <footer>
-            <div class="timer-section">
-                <div class="timer-label">Sleep Timer</div>
-                <div class="timer-presets" id="timer-presets">
-                    <button data-minutes="15">15m</button>
-                    <button data-minutes="30">30m</button>
-                    <button data-minutes="60">1h</button>
-                    <button data-minutes="120">2h</button>
-                    <button data-minutes="240">4h</button>
-                    <button data-minutes="480">8h</button>
+        <section class="moon-section">
+            <div class="moon-container" id="moon-container">
+                <div class="moon-glow" id="moon-glow"></div>
+                <div class="moon-body">
+                    <canvas id="moon-canvas" width="512" height="512"></canvas>
                 </div>
-                <div class="timer-status" id="timer-status"></div>
+                <div class="volume-dots" id="volume-dots">
+                    <div class="vol-dot" data-level="10"></div>
+                    <div class="vol-dot" data-level="9"></div>
+                    <div class="vol-dot" data-level="8"></div>
+                    <div class="vol-dot" data-level="7"></div>
+                    <div class="vol-dot" data-level="6"></div>
+                    <div class="vol-dot" data-level="5"></div>
+                    <div class="vol-dot" data-level="4"></div>
+                    <div class="vol-dot" data-level="3"></div>
+                    <div class="vol-dot" data-level="2"></div>
+                    <div class="vol-dot" data-level="1"></div>
+                </div>
             </div>
-        </footer>
+            <div class="onboarding-hint" id="onboarding-hint">swipe the moon to set volume</div>
+        </section>
     </div>
 
+    <div class="volume-hint" id="volume-hint"></div>
+
+    <div class="fab fab-left">
+        <button class="sounds-btn" id="sounds-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <line x1="4" y1="8" x2="4" y2="16" />
+                <line x1="8" y1="5" x2="8" y2="19" />
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <line x1="16" y1="7" x2="16" y2="17" />
+                <line x1="20" y1="10" x2="20" y2="14" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="fab fab-right">
+        <button class="play-btn" id="play-btn" type="button">
+            <svg class="play-icon" id="play-icon" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="6,3 20,12 6,21" />
+            </svg>
+            <svg class="pause-icon" id="pause-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+                <rect x="5" y="3" width="4" height="18" rx="1" />
+                <rect x="15" y="3" width="4" height="18" rx="1" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="drawer-backdrop" id="drawer-backdrop"></div>
+    <div class="drawer" id="drawer">
+        <div class="drawer-handle"></div>
+
+        <div class="drawer-section">
+            <span class="drawer-label">sounds</span>
+            <div class="sounds-grid" id="sounds-grid"></div>
+        </div>
+
+        <div class="drawer-section">
+            <span class="drawer-label">sleep</span>
+            <div class="timer-presets" id="timer-presets">
+                <button data-minutes="1" type="button">1m</button>
+                <button data-minutes="15" type="button">15m</button>
+                <button data-minutes="30" type="button">30m</button>
+                <button data-minutes="60" type="button">1h</button>
+                <button data-minutes="120" type="button">2h</button>
+                <button data-minutes="240" type="button">4h</button>
+                <button data-minutes="480" type="button">8h</button>
+            </div>
+            <div class="timer-status" id="timer-status"></div>
+        </div>
+
+        <div class="drawer-section">
+            <div class="schedule-row">
+                <span class="drawer-label">schedule</span>
+                <input type="time" id="schedule-start" value="22:00">
+                <span class="schedule-dash">—</span>
+                <input type="time" id="schedule-stop" value="07:00">
+                <button class="pill-toggle" id="schedule-toggle" type="button"></button>
+            </div>
+            <div class="schedule-status" id="schedule-status"></div>
+        </div>
+
+        <button class="drawer-done" id="drawer-done" type="button">done</button>
+    </div>
+
+    <script src="/moon.js"></script>
     <script src="/app.js"></script>
 </body>
 </html>

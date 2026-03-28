@@ -1,9 +1,9 @@
-use crate::state::{AppState, AudioCommand, SleepTimer, StatusResponse};
+use crate::state::{AudioCommand, Schedule, SleepTimer, StatusResponse};
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use rust_embed::Embed;
@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tracing::info;
+
+use crate::state::AppState;
 
 #[derive(Embed)]
 #[folder = "static/"]
@@ -25,9 +27,13 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/", get(index_handler))
         .route("/api/sounds", get(list_sounds))
         .route("/api/sounds/{id}/toggle", post(toggle_sound))
-        .route("/api/sounds/{id}/volume", post(set_sound_volume))
-        .route("/api/master-volume", post(set_master_volume))
+        .route("/api/volume", post(set_volume))
         .route("/api/sleep-timer", post(set_sleep_timer))
+        .route("/api/schedule", get(get_schedule))
+        .route("/api/schedule", post(set_schedule))
+        .route("/api/schedule", delete(delete_schedule))
+        .route("/api/adaptive", get(get_adaptive))
+        .route("/api/adaptive", post(set_adaptive))
         .route("/api/status", get(get_status));
 
     #[cfg(feature = "eink")]
@@ -78,25 +84,47 @@ async fn toggle_sound(
 
     let sound = state
         .sounds
-        .iter_mut()
+        .iter()
         .find(|s| s.id == id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    sound.active = !sound.active;
-    let active = sound.active;
-    let volume = sound.volume;
+    let was_active = sound.active;
 
-    let cmd = if active {
-        AudioCommand::Play {
-            id: id.clone(),
-            volume,
+    if was_active {
+        let _ = state
+            .audio_tx
+            .send(AudioCommand::Stop { id: id.clone() })
+            .await;
+        if let Some(s) = state.sounds.iter_mut().find(|s| s.id == id) {
+            s.active = false;
         }
+        info!("Stopped sound {id}");
     } else {
-        AudioCommand::Stop { id: id.clone() }
-    };
-
-    let _ = state.audio_tx.send(cmd).await;
-    info!("Toggled sound {id}: active={active}");
+        // Stop whatever is currently playing, then start the new one
+        let active_ids: Vec<String> = state
+            .sounds
+            .iter()
+            .filter(|s| s.active)
+            .map(|s| s.id.clone())
+            .collect();
+        for aid in &active_ids {
+            let _ = state
+                .audio_tx
+                .send(AudioCommand::Stop { id: aid.clone() })
+                .await;
+        }
+        for s in state.sounds.iter_mut() {
+            s.active = false;
+        }
+        let _ = state
+            .audio_tx
+            .send(AudioCommand::Play { id: id.clone() })
+            .await;
+        if let Some(s) = state.sounds.iter_mut().find(|s| s.id == id) {
+            s.active = true;
+        }
+        info!("Playing sound {id}");
+    }
 
     Ok(Json(state.status()))
 }
@@ -106,36 +134,7 @@ pub struct VolumeRequest {
     pub volume: f32,
 }
 
-async fn set_sound_volume(
-    State(state): State<SharedState>,
-    Path(id): Path<String>,
-    Json(body): Json<VolumeRequest>,
-) -> Result<Json<StatusResponse>, StatusCode> {
-    let mut state = state.write().await;
-    let volume = body.volume.clamp(0.0, 1.0);
-
-    let sound = state
-        .sounds
-        .iter_mut()
-        .find(|s| s.id == id)
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    sound.volume = volume;
-
-    if sound.active {
-        let _ = state
-            .audio_tx
-            .send(AudioCommand::SetVolume {
-                id: id.clone(),
-                volume,
-            })
-            .await;
-    }
-
-    Ok(Json(state.status()))
-}
-
-async fn set_master_volume(
+async fn set_volume(
     State(state): State<SharedState>,
     Json(body): Json<VolumeRequest>,
 ) -> Json<StatusResponse> {
@@ -146,6 +145,22 @@ async fn set_master_volume(
         .audio_tx
         .send(AudioCommand::SetMasterVolume(volume))
         .await;
+
+    // Disable adaptive mode on manual volume change
+    if state.adaptive.enabled {
+        state.adaptive.enabled = false;
+        let _ = state
+            .audio_tx
+            .send(AudioCommand::SetAdaptiveMode {
+                enabled: false,
+                min_vol: state.adaptive.min_volume,
+                max_vol: state.adaptive.max_volume,
+                sensitivity: state.adaptive.sensitivity,
+            })
+            .await;
+        info!("Adaptive mode disabled (manual volume change)");
+    }
+
     Json(state.status())
 }
 
@@ -171,6 +186,110 @@ async fn set_sleep_timer(
         });
         info!("Sleep timer set for {} minutes", body.minutes);
     }
+
+    Json(state.status())
+}
+
+// ========================================
+// SCHEDULE
+// ========================================
+
+async fn get_schedule(State(state): State<SharedState>) -> Json<Option<Schedule>> {
+    let state = state.read().await;
+    Json(state.schedule.clone())
+}
+
+#[derive(Deserialize)]
+pub struct ScheduleRequest {
+    pub start_time: String,
+    pub stop_time: String,
+    pub sound_id: String,
+    pub enabled: bool,
+}
+
+async fn set_schedule(
+    State(state): State<SharedState>,
+    Json(body): Json<ScheduleRequest>,
+) -> Json<StatusResponse> {
+    let mut state = state.write().await;
+    let schedule = Schedule {
+        start_time: body.start_time,
+        stop_time: body.stop_time,
+        sound_id: body.sound_id,
+        enabled: body.enabled,
+    };
+    state.schedule = Some(schedule);
+    crate::save_schedule(&state.schedule);
+    info!("Schedule updated");
+    Json(state.status())
+}
+
+async fn delete_schedule(State(state): State<SharedState>) -> Json<StatusResponse> {
+    let mut state = state.write().await;
+    state.schedule = None;
+    crate::save_schedule(&state.schedule);
+    info!("Schedule deleted");
+    Json(state.status())
+}
+
+// ========================================
+// ADAPTIVE VOLUME
+// ========================================
+
+async fn get_adaptive(State(state): State<SharedState>) -> Json<crate::state::AdaptiveConfig> {
+    let state = state.read().await;
+    Json(state.adaptive.clone())
+}
+
+#[derive(Deserialize)]
+pub struct AdaptiveRequest {
+    pub enabled: bool,
+    #[serde(default = "default_min_vol")]
+    pub min_volume: f32,
+    #[serde(default = "default_max_vol")]
+    pub max_volume: f32,
+    #[serde(default = "default_sensitivity")]
+    pub sensitivity: f32,
+}
+
+fn default_min_vol() -> f32 {
+    0.1
+}
+fn default_max_vol() -> f32 {
+    1.0
+}
+fn default_sensitivity() -> f32 {
+    0.5
+}
+
+async fn set_adaptive(
+    State(state): State<SharedState>,
+    Json(body): Json<AdaptiveRequest>,
+) -> Json<StatusResponse> {
+    let mut state = state.write().await;
+
+    // Only allow enabling if mic is available
+    let enabled = body.enabled && state.adaptive.mic_available;
+
+    state.adaptive.enabled = enabled;
+    state.adaptive.min_volume = body.min_volume.clamp(0.0, 1.0);
+    state.adaptive.max_volume = body.max_volume.clamp(0.0, 1.0);
+    state.adaptive.sensitivity = body.sensitivity.clamp(0.0, 1.0);
+
+    let _ = state
+        .audio_tx
+        .send(AudioCommand::SetAdaptiveMode {
+            enabled,
+            min_vol: state.adaptive.min_volume,
+            max_vol: state.adaptive.max_volume,
+            sensitivity: state.adaptive.sensitivity,
+        })
+        .await;
+
+    info!(
+        "Adaptive: enabled={}, sensitivity={}",
+        enabled, state.adaptive.sensitivity
+    );
 
     Json(state.status())
 }
