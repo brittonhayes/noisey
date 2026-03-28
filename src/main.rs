@@ -190,7 +190,10 @@ async fn main() {
             ..DisplayConfig::default()
         };
         spawn_display_thread(state.clone(), display_config);
-        info!(refresh_secs = args.eink_refresh, "Startup: e-ink display enabled");
+        info!(
+            refresh_secs = args.eink_refresh,
+            "Startup: e-ink display enabled"
+        );
     }
 
     // Start web server

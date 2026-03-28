@@ -163,7 +163,9 @@ fn run_audio_engine(
                 Some(dev)
             }
             None => {
-                warn!("Audio engine: failed to open playback device, falling back to simulation mode");
+                warn!(
+                    "Audio engine: failed to open playback device, falling back to simulation mode"
+                );
                 let _ = sim_tx.send(true);
                 None
             }

@@ -42,12 +42,8 @@ pub struct AppState {
 
 #[derive(Debug)]
 pub enum AudioCommand {
-    Play {
-        id: String,
-    },
-    Stop {
-        id: String,
-    },
+    Play { id: String },
+    Stop { id: String },
     SetMasterVolume(f32),
     StopAll,
 }
