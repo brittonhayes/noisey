@@ -1,100 +1,67 @@
 # noisey
 
-A Rust-based IoT ambient noise machine with web-based remote control. Designed to run on a Raspberry Pi as a replacement for commercial sound machines like the Sound+Sleep SE.
+A white noise machine that runs on a Raspberry Pi. Drop it in a small enclosure with a speaker, control it from your phone.
 
-## Features
+Built in Rust. Single binary. No dependencies to install on the Pi.
 
-- **Procedural noise generation** — White, pink, and brown noise built-in
-- **Custom sound files** — Drop `.wav` or `.ogg` files into the `sounds/` directory
-- **Sound mixing** — Play multiple sounds simultaneously with individual volume controls
-- **Sleep timer** — Preset durations (15m to 8h) with live countdown
-- **Mobile-first web UI** — Control everything from your phone's browser
-- **Single binary** — Static assets embedded, no external files needed
+## What it does
 
-- **E-ink display** — Optional status display for a dedicated hardware build ([build guide](docs/BUILD.md))
+- Generates white, pink, and brown noise procedurally
+- Plays `.wav` and `.ogg` sound files you provide (rain, wind, whatever you want)
+- Mixes multiple sounds with independent volume controls
+- Sleep timer with presets from 15 minutes to 8 hours
+- Web UI designed for your phone — open the Pi's IP in a browser and you're done
 
-## Quick Start
+## Hardware
+
+This was built for a **Raspberry Pi Zero W** with a small 3" speaker in a compact enclosure. That's the whole thing — Pi, speaker, power cable.
+
+For audio output, wire up an I2S DAC/amp like the [MAX98357A](https://www.adafruit.com/product/3006) ($6). See the [build guide](docs/BUILD.md) for wiring and setup details.
+
+## Getting started
 
 ```bash
-# Build
 cargo build --release
-
-# Run (serves web UI on http://localhost:8080)
 ./target/release/noisey
+```
 
-# With custom sound files
+Open `http://<pi-ip>:8080` on your phone.
+
+### Custom sounds
+
+Put `.wav` or `.ogg` files in a `sounds/` directory:
+
+```bash
 ./target/release/noisey --sounds-dir ~/my-sounds
-
-# Custom port/host
-./target/release/noisey --port 3000 --host 0.0.0.0
 ```
 
-Then open `http://<device-ip>:8080` on your phone.
+Filenames become display names — `ocean-waves.ogg` shows up as "Ocean Waves".
 
-## Adding Sound Files
+## Deploy to the Pi
 
-Place `.wav` or `.ogg` files in the `sounds/` directory (or specify with `--sounds-dir`):
-
-```
-sounds/
-├── rain.wav
-├── ocean-waves.ogg
-├── thunder.wav
-└── wind.ogg
-```
-
-Filenames become display names: `ocean-waves.ogg` → "Ocean Waves".
-
-## Raspberry Pi Deployment
-
-### Cross-compile
+Cross-compile from your dev machine:
 
 ```bash
-# Install cross (one-time)
 cargo install cross --git https://github.com/cross-rs/cross
-
-# Build for RPi 3/4/5 (64-bit)
-./cross-compile.sh
-
-# Build for RPi 2/3 (32-bit)
-./cross-compile.sh armv7
+./cross-compile.sh           # aarch64 (Pi Zero 2 W, Pi 3/4/5)
+./cross-compile.sh armv7     # armv7 (Pi Zero W, Pi 2/3)
 ```
 
-### Install on Pi
+Copy to the Pi and run as a service:
 
 ```bash
-scp target/aarch64-unknown-linux-gnu/release/noisey pi@raspberrypi.local:/usr/local/bin/
-scp noisey.service pi@raspberrypi.local:/tmp/
+scp target/aarch64-unknown-linux-gnu/release/noisey pi@noisey.local:/usr/local/bin/
+scp noisey.service pi@noisey.local:/tmp/
 
-ssh pi@raspberrypi.local
+ssh pi@noisey.local
 sudo mv /tmp/noisey.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now noisey
 ```
 
-### Prerequisites on Pi
-
-```bash
-sudo apt install libasound2-dev
-```
-
-## E-ink Display
-
-Build noisey into a dedicated sleep device with a Waveshare e-ink display. The screen shows active sounds, volume, and sleep timer — no phone needed to see status at a glance.
-
-```bash
-# Build with e-ink support
-cargo build --release --features eink
-
-# Run with display enabled
-./target/release/noisey --eink --eink-refresh 30
-```
-
-When hardware isn't available (development), the display output is written to `/tmp/noisey-display.txt`.
-
-See the full **[hardware build guide](docs/BUILD.md)** for parts list, wiring, enclosure design, and assembly instructions.
-
 ## API
+
+Everything the web UI does goes through a simple REST API:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -102,9 +69,9 @@ See the full **[hardware build guide](docs/BUILD.md)** for parts list, wiring, e
 | `POST` | `/api/sounds/:id/toggle` | Toggle a sound on/off |
 | `POST` | `/api/sounds/:id/volume` | Set volume `{ "volume": 0.7 }` |
 | `POST` | `/api/master-volume` | Set master volume `{ "volume": 0.8 }` |
-| `POST` | `/api/sleep-timer` | Set timer `{ "minutes": 60 }` (0 = cancel) |
-| `GET` | `/api/status` | Full status |
+| `POST` | `/api/sleep-timer` | Set timer `{ "minutes": 60 }` (0 to cancel) |
+| `GET` | `/api/status` | Full device status |
 
 ## License
 
-MIT
+[GPL-2.0](LICENSE)

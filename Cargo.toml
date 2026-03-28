@@ -3,7 +3,7 @@ name = "noisey"
 version = "0.1.0"
 edition = "2021"
 description = "An IoT ambient noise machine with web-based remote control"
-license = "MIT"
+license = "GPL-2.0"
 
 [features]
 default = []
