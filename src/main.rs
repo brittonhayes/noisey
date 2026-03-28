@@ -9,7 +9,7 @@ use crate::audio::{scan_sound_files, spawn_audio_thread};
 #[cfg(feature = "eink")]
 use crate::display::{spawn_display_thread, DisplayConfig};
 use crate::server::{create_router, SharedState};
-use crate::state::{AdaptiveConfig, AppState, AudioCommand, Schedule, SoundCategory, SoundEntry};
+use crate::state::{AppState, AudioCommand, Schedule, SoundCategory, SoundEntry};
 use chrono::NaiveTime;
 use clap::Parser;
 use std::net::SocketAddr;
@@ -129,33 +129,34 @@ async fn main() {
         });
     }
 
+    let file_count = sounds.len() - 4;
     info!(
-        "Loaded {} sounds ({} from files)",
-        sounds.len(),
-        sounds.len() - 4
+        total = sounds.len(),
+        builtin = 4,
+        files = file_count,
+        "Startup: sound catalog loaded"
     );
 
     // Create audio command channel
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(64);
 
     // Start audio engine on a dedicated thread and wait for actual mode
-    let (sim_rx, adaptive_state) =
-        spawn_audio_thread(args.sounds_dir.clone(), audio_rx, args.simulate);
+    let sim_rx = spawn_audio_thread(args.sounds_dir.clone(), audio_rx, args.simulate);
     let simulate = sim_rx.recv().unwrap_or(args.simulate);
-    info!("Audio engine started");
-
-    // Check mic availability from adaptive state
-    let mic_available = adaptive_state
-        .lock()
-        .map(|a| a.mic_available)
-        .unwrap_or(false);
+    if simulate {
+        info!("Startup: audio engine started (simulation mode)");
+    } else {
+        info!("Startup: audio engine started");
+    }
 
     // Load saved schedule
     let schedule = load_schedule();
     if let Some(ref s) = schedule {
         info!(
-            "Loaded schedule: {} → {}, sound={}",
-            s.start_time, s.stop_time, s.sound_id
+            start = %s.start_time,
+            stop = %s.stop_time,
+            sound = %s.sound_id,
+            "Startup: schedule loaded from disk"
         );
     }
 
@@ -165,10 +166,6 @@ async fn main() {
         master_volume: 0.8,
         sleep_timer: None,
         schedule,
-        adaptive: AdaptiveConfig {
-            mic_available,
-            ..AdaptiveConfig::default()
-        },
         audio_tx,
         simulate,
     }));
@@ -193,7 +190,7 @@ async fn main() {
             ..DisplayConfig::default()
         };
         spawn_display_thread(state.clone(), display_config);
-        info!("E-ink display enabled");
+        info!(refresh_secs = args.eink_refresh, "Startup: e-ink display enabled");
     }
 
     // Start web server
@@ -204,7 +201,7 @@ async fn main() {
     let router = create_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
-    info!("Noisey listening on http://{addr}");
+    info!(addr = %addr, "Startup: web server listening on http://{addr}");
 
     axum::serve(listener, router).await.unwrap();
 }
@@ -216,7 +213,7 @@ async fn sleep_timer_task(state: SharedState) {
         let mut state = state.write().await;
         if let Some(timer) = &state.sleep_timer {
             if Instant::now() >= timer.end_time {
-                info!("Sleep timer expired — stopping all sounds");
+                info!("Timer: sleep timer expired, stopping all sounds");
                 let _ = state.audio_tx.send(AudioCommand::StopAll).await;
 
                 // Mark all sounds as inactive
@@ -293,14 +290,14 @@ async fn schedule_task(state: SharedState) {
             if let Some(s) = state.sounds.iter_mut().find(|s| s.id == sound_id) {
                 s.active = true;
             }
-            info!("Schedule: starting sound {sound_id}");
+            info!(sound = %sound_id, "Schedule: entering window, starting sound");
         } else if !in_window && was_in_window {
             // Leaving window — stop all sounds
             let _ = state.audio_tx.send(AudioCommand::StopAll).await;
             for s in state.sounds.iter_mut() {
                 s.active = false;
             }
-            info!("Schedule: stopping all sounds");
+            info!("Schedule: leaving window, stopping all sounds");
         }
 
         was_in_window = in_window;

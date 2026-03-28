@@ -32,8 +32,6 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/api/schedule", get(get_schedule))
         .route("/api/schedule", post(set_schedule))
         .route("/api/schedule", delete(delete_schedule))
-        .route("/api/adaptive", get(get_adaptive))
-        .route("/api/adaptive", post(set_adaptive))
         .route("/api/status", get(get_status));
 
     #[cfg(feature = "eink")]
@@ -98,7 +96,7 @@ async fn toggle_sound(
         if let Some(s) = state.sounds.iter_mut().find(|s| s.id == id) {
             s.active = false;
         }
-        info!("Stopped sound {id}");
+        info!(sound = %id, "API stop request");
     } else {
         // Stop whatever is currently playing, then start the new one
         let active_ids: Vec<String> = state
@@ -123,7 +121,7 @@ async fn toggle_sound(
         if let Some(s) = state.sounds.iter_mut().find(|s| s.id == id) {
             s.active = true;
         }
-        info!("Playing sound {id}");
+        info!(sound = %id, "API play request");
     }
 
     Ok(Json(state.status()))
@@ -146,20 +144,7 @@ async fn set_volume(
         .send(AudioCommand::SetMasterVolume(volume))
         .await;
 
-    // Disable adaptive mode on manual volume change
-    if state.adaptive.enabled {
-        state.adaptive.enabled = false;
-        let _ = state
-            .audio_tx
-            .send(AudioCommand::SetAdaptiveMode {
-                enabled: false,
-                min_vol: state.adaptive.min_volume,
-                max_vol: state.adaptive.max_volume,
-                sensitivity: state.adaptive.sensitivity,
-            })
-            .await;
-        info!("Adaptive mode disabled (manual volume change)");
-    }
+    info!(volume = %volume, "API volume set");
 
     Json(state.status())
 }
@@ -177,14 +162,14 @@ async fn set_sleep_timer(
 
     if body.minutes == 0 {
         state.sleep_timer = None;
-        info!("Sleep timer cancelled");
+        info!("API sleep timer cancelled");
     } else {
         let duration_secs = body.minutes * 60;
         state.sleep_timer = Some(SleepTimer {
             end_time: Instant::now() + Duration::from_secs(duration_secs),
             duration_secs,
         });
-        info!("Sleep timer set for {} minutes", body.minutes);
+        info!(minutes = body.minutes, "API sleep timer set");
     }
 
     Json(state.status())
@@ -218,9 +203,15 @@ async fn set_schedule(
         sound_id: body.sound_id,
         enabled: body.enabled,
     };
+    info!(
+        start = %schedule.start_time,
+        stop = %schedule.stop_time,
+        sound = %schedule.sound_id,
+        enabled = schedule.enabled,
+        "API schedule updated"
+    );
     state.schedule = Some(schedule);
     crate::save_schedule(&state.schedule);
-    info!("Schedule updated");
     Json(state.status())
 }
 
@@ -228,69 +219,7 @@ async fn delete_schedule(State(state): State<SharedState>) -> Json<StatusRespons
     let mut state = state.write().await;
     state.schedule = None;
     crate::save_schedule(&state.schedule);
-    info!("Schedule deleted");
-    Json(state.status())
-}
-
-// ========================================
-// ADAPTIVE VOLUME
-// ========================================
-
-async fn get_adaptive(State(state): State<SharedState>) -> Json<crate::state::AdaptiveConfig> {
-    let state = state.read().await;
-    Json(state.adaptive.clone())
-}
-
-#[derive(Deserialize)]
-pub struct AdaptiveRequest {
-    pub enabled: bool,
-    #[serde(default = "default_min_vol")]
-    pub min_volume: f32,
-    #[serde(default = "default_max_vol")]
-    pub max_volume: f32,
-    #[serde(default = "default_sensitivity")]
-    pub sensitivity: f32,
-}
-
-fn default_min_vol() -> f32 {
-    0.1
-}
-fn default_max_vol() -> f32 {
-    1.0
-}
-fn default_sensitivity() -> f32 {
-    0.5
-}
-
-async fn set_adaptive(
-    State(state): State<SharedState>,
-    Json(body): Json<AdaptiveRequest>,
-) -> Json<StatusResponse> {
-    let mut state = state.write().await;
-
-    // Only allow enabling if mic is available
-    let enabled = body.enabled && state.adaptive.mic_available;
-
-    state.adaptive.enabled = enabled;
-    state.adaptive.min_volume = body.min_volume.clamp(0.0, 1.0);
-    state.adaptive.max_volume = body.max_volume.clamp(0.0, 1.0);
-    state.adaptive.sensitivity = body.sensitivity.clamp(0.0, 1.0);
-
-    let _ = state
-        .audio_tx
-        .send(AudioCommand::SetAdaptiveMode {
-            enabled,
-            min_vol: state.adaptive.min_volume,
-            max_vol: state.adaptive.max_volume,
-            sensitivity: state.adaptive.sensitivity,
-        })
-        .await;
-
-    info!(
-        "Adaptive: enabled={}, sensitivity={}",
-        enabled, state.adaptive.sensitivity
-    );
-
+    info!("API schedule deleted");
     Json(state.status())
 }
 

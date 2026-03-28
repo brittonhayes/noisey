@@ -231,7 +231,7 @@ body {
 
 .onboarding-hint {
     font-family: var(--mono);
-    font-size: 0.5625rem;
+    font-size: 0.75rem;
     font-weight: 300;
     color: var(--text-dim);
     letter-spacing: 0.06em;

@@ -107,31 +107,6 @@ const SMOOTH_COEFF: f32 = 1.0 / (0.005 * SAMPLE_RATE as f32);
 /// Hardcoded warmth level (40%).
 const WARMTH: f32 = 0.4;
 
-/// Shared state for adaptive volume (mic capture → volume adjustment).
-pub struct AdaptiveState {
-    pub enabled: bool,
-    pub ambient_rms: f32,
-    pub baseline_rms: f32,
-    pub min_volume: f32,
-    pub max_volume: f32,
-    pub sensitivity: f32,
-    pub mic_available: bool,
-}
-
-impl Default for AdaptiveState {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ambient_rms: 0.0,
-            baseline_rms: 0.0,
-            min_volume: 0.1,
-            max_volume: 1.0,
-            sensitivity: 0.5,
-            mic_available: false,
-        }
-    }
-}
-
 /// Shared state between the command-processing loop and the audio callback.
 struct MixerState {
     sounds: HashMap<String, ActiveSound>,
@@ -147,21 +122,19 @@ fn warmth_to_cutoff(warmth: f32) -> f32 {
 }
 
 /// Spawn the audio engine on a dedicated thread.
-/// Returns (sim_rx, adaptive_state) — the adaptive state is shared with the capture device.
+/// Returns a receiver that sends the actual simulation mode (may differ from requested if device fails).
 pub fn spawn_audio_thread(
     sounds_dir: PathBuf,
     rx: mpsc::Receiver<AudioCommand>,
     simulate: bool,
-) -> (std::sync::mpsc::Receiver<bool>, Arc<Mutex<AdaptiveState>>) {
+) -> std::sync::mpsc::Receiver<bool> {
     let (sim_tx, sim_rx) = std::sync::mpsc::channel();
-    let adaptive = Arc::new(Mutex::new(AdaptiveState::default()));
-    let adaptive_clone = Arc::clone(&adaptive);
     std::thread::spawn(move || {
-        if let Err(e) = run_audio_engine(sounds_dir, rx, simulate, sim_tx, adaptive_clone) {
+        if let Err(e) = run_audio_engine(sounds_dir, rx, simulate, sim_tx) {
             error!("Audio engine failed: {e}");
         }
     });
-    (sim_rx, adaptive)
+    sim_rx
 }
 
 fn run_audio_engine(
@@ -169,7 +142,6 @@ fn run_audio_engine(
     mut rx: mpsc::Receiver<AudioCommand>,
     simulate: bool,
     sim_tx: std::sync::mpsc::Sender<bool>,
-    adaptive: Arc<Mutex<AdaptiveState>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let warmth_cutoff = warmth_to_cutoff(WARMTH);
     let mixer = Arc::new(Mutex::new(MixerState {
@@ -180,41 +152,22 @@ fn run_audio_engine(
     }));
 
     let _device = if simulate {
-        info!("Running in simulation mode (no audio output)");
+        info!("Audio engine: running in simulation mode (no audio hardware)");
         let _ = sim_tx.send(true);
         None
     } else {
         match try_open_device(Arc::clone(&mixer)) {
             Some(dev) => {
-                info!("Audio device started (miniaudio)");
+                info!("Audio engine: playback device opened (miniaudio)");
                 let _ = sim_tx.send(false);
                 Some(dev)
             }
             None => {
-                warn!("Failed to open audio device — falling back to simulation mode");
+                warn!("Audio engine: failed to open playback device, falling back to simulation mode");
                 let _ = sim_tx.send(true);
                 None
             }
         }
-    };
-
-    // Try to open capture device for adaptive volume
-    let _capture_device = if !simulate {
-        match try_open_capture_device(Arc::clone(&adaptive)) {
-            Some(dev) => {
-                if let Ok(mut a) = adaptive.lock() {
-                    a.mic_available = true;
-                }
-                info!("Capture device started for adaptive volume");
-                Some(dev)
-            }
-            None => {
-                info!("No capture device available — adaptive volume disabled");
-                None
-            }
-        }
-    } else {
-        None
     };
 
     if _device.is_none() {
@@ -236,49 +189,9 @@ fn run_audio_engine(
         });
     }
 
-    // Spawn adaptive volume adjustment loop
-    let adaptive_mixer = Arc::clone(&mixer);
-    let adaptive_state = Arc::clone(&adaptive);
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let (enabled, ambient_rms, baseline_rms, min_vol, max_vol, sensitivity) = {
-                let a = match adaptive_state.lock() {
-                    Ok(a) => a,
-                    Err(_) => continue,
-                };
-                if !a.enabled {
-                    continue;
-                }
-                (
-                    a.enabled,
-                    a.ambient_rms,
-                    a.baseline_rms,
-                    a.min_volume,
-                    a.max_volume,
-                    a.sensitivity,
-                )
-            };
+    process_commands(&mixer, &sounds_dir, &mut rx);
 
-            if !enabled {
-                continue;
-            }
-
-            // Volume above baseline is external ambient noise
-            let ambient_above = (ambient_rms - baseline_rms).max(0.0);
-            // Scale: sensitivity of 0.5 means ambient_above of ~0.1 maps to full range
-            let normalized = (ambient_above * sensitivity * 20.0).clamp(0.0, 1.0);
-            let target_vol = min_vol + normalized * (max_vol - min_vol);
-
-            if let Ok(mut mixer) = adaptive_mixer.lock() {
-                mixer.master_volume.set(target_vol);
-            }
-        }
-    });
-
-    process_commands(&mixer, &adaptive, &sounds_dir, &mut rx);
-
-    info!("Audio engine shutting down");
+    info!("Audio engine: shutting down");
     Ok(())
 }
 
@@ -347,70 +260,14 @@ fn try_open_device(mixer: Arc<Mutex<MixerState>>) -> Option<miniaudio::Device> {
     Some(device)
 }
 
-fn try_open_capture_device(adaptive: Arc<Mutex<AdaptiveState>>) -> Option<miniaudio::Device> {
-    let mut config = miniaudio::DeviceConfig::new(miniaudio::DeviceType::Capture);
-    config.capture_mut().set_format(miniaudio::Format::F32);
-    config.capture_mut().set_channels(1);
-    config.set_sample_rate(SAMPLE_RATE);
-
-    // Coefficients for exponential moving averages
-    // ~0.01 per callback ≈ responsive ambient tracking
-    // ~0.0005 per callback ≈ very slow baseline (machine's own output)
-    const AMBIENT_COEFF: f32 = 0.01;
-    const BASELINE_COEFF: f32 = 0.0005;
-
-    config.set_data_callback(move |_device, _output, input| {
-        let samples = input.as_samples::<f32>();
-        if samples.is_empty() {
-            return;
-        }
-
-        // Compute RMS of this buffer
-        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
-        let rms = (sum_sq / samples.len() as f32).sqrt();
-
-        if let Ok(mut a) = adaptive.lock() {
-            if !a.enabled {
-                // Still update baseline so it's ready when enabled
-                a.baseline_rms += BASELINE_COEFF * (rms - a.baseline_rms);
-                return;
-            }
-            a.ambient_rms += AMBIENT_COEFF * (rms - a.ambient_rms);
-            a.baseline_rms += BASELINE_COEFF * (rms - a.baseline_rms);
-        }
-    });
-
-    let device = miniaudio::Device::new(None, &config).ok()?;
-    device.start().ok()?;
-    Some(device)
-}
-
 fn process_commands(
     mixer: &Arc<Mutex<MixerState>>,
-    adaptive: &Arc<Mutex<AdaptiveState>>,
     sounds_dir: &Path,
     rx: &mut mpsc::Receiver<AudioCommand>,
 ) {
     let mut file_cache: HashMap<String, Arc<DecodedAudio>> = HashMap::new();
 
     while let Some(cmd) = rx.blocking_recv() {
-        if let AudioCommand::SetAdaptiveMode {
-            enabled,
-            min_vol,
-            max_vol,
-            sensitivity,
-        } = cmd
-        {
-            if let Ok(mut a) = adaptive.lock() {
-                a.enabled = enabled;
-                a.min_volume = min_vol;
-                a.max_volume = max_vol;
-                a.sensitivity = sensitivity;
-                info!("Adaptive mode: enabled={enabled}, sensitivity={sensitivity}");
-            }
-            continue;
-        }
-
         let mut state = mixer.lock().unwrap();
         match cmd {
             AudioCommand::Play { id } => {
@@ -448,10 +305,10 @@ fn process_commands(
                                 pending_remove: false,
                             },
                         );
-                        info!("Playing sound: {id}");
+                        info!(sound = %id, "Audio engine: started playback (fade in)");
                     }
                     None => {
-                        warn!("Unknown sound: {id}");
+                        warn!(sound = %id, "Audio engine: sound not found");
                     }
                 }
             }
@@ -459,20 +316,20 @@ fn process_commands(
                 if let Some(active) = state.sounds.get_mut(&id) {
                     active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
                     active.pending_remove = true;
-                    info!("Stopping sound (fade out): {id}");
+                    info!(sound = %id, "Audio engine: fading out");
                 }
             }
             AudioCommand::SetMasterVolume(vol) => {
                 state.master_volume.set(vol);
             }
             AudioCommand::StopAll => {
-                for (id, active) in state.sounds.iter_mut() {
+                let count = state.sounds.len();
+                for (_id, active) in state.sounds.iter_mut() {
                     active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
                     active.pending_remove = true;
-                    info!("Stopping sound (fade out): {id}");
                 }
+                info!(count = count, "Audio engine: fading out all sounds");
             }
-            AudioCommand::SetAdaptiveMode { .. } => unreachable!(),
         }
     }
 }
@@ -535,9 +392,11 @@ fn decode_wav(path: &Path) -> Option<DecodedAudio> {
     };
 
     info!(
-        "Decoded WAV: {} ({channels}ch, {sample_rate}Hz, {} samples)",
-        path.display(),
-        samples.len()
+        path = %path.display(),
+        channels = channels,
+        sample_rate = sample_rate,
+        samples = samples.len(),
+        "Audio engine: decoded WAV file"
     );
 
     Some(DecodedAudio { samples, channels })
@@ -559,9 +418,11 @@ fn decode_ogg(path: &Path) -> Option<DecodedAudio> {
     }
 
     info!(
-        "Decoded OGG: {} ({channels}ch, {sample_rate}Hz, {} samples)",
-        path.display(),
-        samples.len()
+        path = %path.display(),
+        channels = channels,
+        sample_rate = sample_rate,
+        samples = samples.len(),
+        "Audio engine: decoded OGG file"
     );
 
     Some(DecodedAudio { samples, channels })

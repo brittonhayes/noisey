@@ -456,9 +456,7 @@ function renderSchedule(schedule) {
         } else {
             inWindow = nowMins >= startMins || nowMins < stopMins;
         }
-        scheduleStatus.innerHTML = inWindow
-            ? '<span class="active-badge">active</span> — playing until ' + scheduleStop.value
-            : 'next: ' + scheduleStart.value;
+        scheduleStatus.innerHTML = '';
     } else {
         scheduleStatus.innerHTML = '';
     }
@@ -484,28 +482,6 @@ function updateMainStatus() {
         parts.push('sleep ' + display + ' <button class="cancel-btn" type="button" onclick="setTimer(0)">cancel</button>');
     }
 
-    // Schedule
-    if (scheduleEnabled) {
-        const now = new Date();
-        const nowMins = now.getHours() * 60 + now.getMinutes();
-        const [sh, sm] = scheduleStart.value.split(':').map(Number);
-        const [eh, em] = scheduleStop.value.split(':').map(Number);
-        const startMins = sh * 60 + sm;
-        const stopMins = eh * 60 + em;
-
-        let inWindow;
-        if (startMins <= stopMins) {
-            inWindow = nowMins >= startMins && nowMins < stopMins;
-        } else {
-            inWindow = nowMins >= startMins || nowMins < stopMins;
-        }
-
-        if (inWindow) {
-            parts.push('scheduled until ' + scheduleStop.value);
-        } else {
-            parts.push('scheduled ' + scheduleStart.value);
-        }
-    }
 
     el.innerHTML = parts.join(' · ');
 }
