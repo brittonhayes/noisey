@@ -6,6 +6,7 @@ let soundsCreated = false;
 let currentVolLevel = 1;
 let playing = false;
 let activeSoundId = null;
+let volumeDragging = false;
 
 // ========================================
 // API
@@ -58,18 +59,17 @@ function setVolumeLevel(level) {
     updateMoonPhase(t);
     updateMoonGlow(t);
 
-    // Stars — dim at low volume, bright and plentiful at high volume
+    // Stars — always faintly visible, brighter with volume
     for (let i = 0; i < stars.length; i++) {
         const s = stars[i];
-        const visibility = Math.max(0, (t - s.threshold * 0.7) / (1 - s.threshold * 0.7));
-        const brightness = visibility * (s.size > 1 ? 0.6 : 0.4);
-        if (s.el.classList.contains('star--twinkle')) {
-            s.el.style.setProperty('--star-base', (brightness * 0.5).toFixed(3));
-            s.el.style.setProperty('--star-peak', brightness.toFixed(3));
-            s.el.style.opacity = brightness > 0 ? 1 : 0;
-        } else {
-            s.el.style.opacity = brightness.toFixed(3);
-        }
+        // Ambient baseline: all stars shimmer faintly even at zero volume
+        const ambient = s.size >= 2 ? 0.15 : s.size >= 1.5 ? 0.1 : 0.06;
+        const visibility = Math.max(0, (t - s.threshold * 0.6) / (1 - s.threshold * 0.6));
+        const volumeBrightness = visibility * (s.size >= 2 ? 0.85 : s.size >= 1.5 ? 0.7 : 0.5);
+        const brightness = Math.max(ambient, volumeBrightness);
+        s.el.style.setProperty('--star-base', (brightness * 0.35).toFixed(3));
+        s.el.style.setProperty('--star-peak', brightness.toFixed(3));
+        s.el.style.opacity = 1;
     }
 }
 
@@ -80,13 +80,11 @@ function updateMoonPhase(t) {
 let glowBaseOpacity = 0;
 
 function updateMoonGlow(t) {
-    // Gentle glow that fades in gradually — cubic for slow start
-    glowBaseOpacity = t * t * t * 0.5;
+    glowBaseOpacity = t * t * t * 0.35;
     if (!playing) {
         moonGlow.style.opacity = glowBaseOpacity.toFixed(3);
     }
-    // Subtle scale: 1x to 1.3x at max
-    const scale = 1 + t * t * 0.3;
+    const scale = 1 + t * t * 0.2;
     moonGlow.style.transform = `scale(${scale.toFixed(2)})`;
 }
 
@@ -136,10 +134,12 @@ function dismissOnboarding() {
 
     moonContainer.addEventListener('pointerdown', (e) => {
         dragging = true;
+        volumeDragging = true;
         startY = e.clientY;
         startLevel = currentVolLevel;
         moonContainer.setPointerCapture(e.pointerId);
         moonContainer.classList.add('touching');
+        volumeDots.classList.add('active');
         dismissOnboarding();
         showHint(currentVolLevel);
     });
@@ -156,13 +156,17 @@ function dismissOnboarding() {
 
     moonContainer.addEventListener('pointerup', () => {
         dragging = false;
+        volumeDragging = false;
         moonContainer.classList.remove('touching');
+        volumeDots.classList.remove('active');
         hideHint();
     });
 
     moonContainer.addEventListener('pointercancel', () => {
         dragging = false;
+        volumeDragging = false;
         moonContainer.classList.remove('touching');
+        volumeDots.classList.remove('active');
         hideHint();
     });
 })();
@@ -195,17 +199,23 @@ function stopGlowPulse() {
 
 const starfield = document.getElementById('starfield');
 const stars = [];
-const STAR_COUNT = 120;
+const STAR_COUNT = 150;
 
 (function createStars() {
     for (let i = 0; i < STAR_COUNT; i++) {
         const el = document.createElement('div');
-        const size = Math.random() < 0.08 ? 1.5 : 1;
+        const r = Math.random();
+        const size = r < 0.05 ? 2.5 : r < 0.2 ? 2 : r < 0.5 ? 1.5 : 1;
         const x = Math.random() * 100;
         const y = Math.random() * 100;
         const threshold = Math.random();
-        const delay = Math.random() * 8;
-        el.className = 'star' + (Math.random() < 0.25 ? ' star--twinkle' : '');
+        const delay = Math.random() * 10;
+        // All stars twinkle — varied speeds for organic feel
+        const speed = 3 + Math.random() * 5; // 3–8s
+        const driftTime = 15 + Math.random() * 25; // 15–40s
+        const dx = (Math.random() - 0.5) * 3; // subtle drift ±1.5px
+        const dy = (Math.random() - 0.5) * 3;
+        el.className = 'star';
         el.style.width = size + 'px';
         el.style.height = size + 'px';
         el.style.left = x + '%';
@@ -213,6 +223,10 @@ const STAR_COUNT = 120;
         el.style.animationDelay = delay + 's';
         el.style.setProperty('--star-base', '0');
         el.style.setProperty('--star-peak', '0');
+        el.style.setProperty('--star-speed', speed + 's');
+        el.style.setProperty('--star-drift', driftTime + 's');
+        el.style.setProperty('--star-dx', dx + 'px');
+        el.style.setProperty('--star-dy', dy + 'px');
         starfield.appendChild(el);
         stars.push({ el, threshold, size });
     }
@@ -508,9 +522,11 @@ async function poll() {
 
         document.getElementById('sim-badge').hidden = !state.simulate;
 
-        const masterPct = Math.max(1, Math.round(state.master_volume * 100));
-        const level = Math.max(1, Math.round(masterPct / 10));
-        setVolumeLevel(level);
+        if (!volumeDragging) {
+            const masterPct = Math.max(1, Math.round(state.master_volume * 100));
+            const level = Math.max(1, Math.round(masterPct / 10));
+            setVolumeLevel(level);
+        }
 
         renderSchedule(state.schedule);
     } catch (e) {

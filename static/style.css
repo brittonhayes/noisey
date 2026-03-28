@@ -51,18 +51,21 @@ body {
 .star {
     position: absolute;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.7);
+    background: #fff;
     opacity: 0;
     transition: opacity 1.8s var(--ease);
-}
-
-.star--twinkle {
-    animation: twinkle 4s ease-in-out infinite alternate;
+    animation: twinkle var(--star-speed, 4s) ease-in-out infinite alternate,
+               drift var(--star-drift, 20s) ease-in-out infinite alternate;
 }
 
 @keyframes twinkle {
     0% { opacity: var(--star-base); }
     100% { opacity: var(--star-peak); }
+}
+
+@keyframes drift {
+    0% { transform: translate(0, 0); }
+    100% { transform: translate(var(--star-dx, 1px), var(--star-dy, 1px)); }
 }
 
 .ambient-glow {
@@ -131,12 +134,12 @@ body {
 
 .moon-glow {
     position: absolute;
-    inset: -30px;
+    inset: -25px;
     border-radius: 50%;
     pointer-events: none;
     z-index: 0;
     opacity: 0;
-    background: radial-gradient(circle, rgba(200, 200, 210, 0.18) 0%, rgba(200, 200, 210, 0.06) 40%, transparent 70%);
+    background: radial-gradient(circle, rgba(200, 200, 210, 0.12) 0%, rgba(200, 200, 210, 0.04) 50%, transparent 70%);
     transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -174,7 +177,12 @@ body {
 .vol-dot {
     border-radius: 50%;
     background: var(--toggle-off);
-    transition: background 0.15s var(--ease);
+    transition: background 0.15s var(--ease), transform 0.25s var(--ease-spring);
+    transform: scale(1);
+}
+
+.volume-dots.active .vol-dot {
+    transform: scale(1.35);
 }
 
 /* Graduated sizes: level 10 (top) = largest, level 1 (bottom) = smallest */
