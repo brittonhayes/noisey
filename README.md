@@ -1,16 +1,23 @@
 # noisey
 
-A white noise machine that runs on a Raspberry Pi. Drop it in a small enclosure with a speaker, control it from your phone.
+A personal ambient sound machine that runs on a Raspberry Pi. Capture peaceful sounds from your travels and experiences, upload them from your phone, and fall asleep to your own memories.
 
 Built in Rust. Single binary. No dependencies to install on the Pi.
 
+## The idea
+
+You're on a trip and record the sound of rain on a tin roof, waves on a quiet beach, crickets outside a cabin. Those voice memos sit in your phone and eventually get buried. Noisey gives them a home — upload them to a small device on your nightstand and sleep to the sounds of places you've been.
+
+Think of it as your own personal [earth.fm](https://earth.fm), but every sound is a memory.
+
 ## What it does
 
-- Generates white, pink, and brown noise procedurally
-- Plays `.wav` and `.ogg` sound files you provide (rain, wind, whatever you want)
-- Mixes multiple sounds with independent volume controls
-- Sleep timer with presets from 15 minutes to 8 hours
-- Web UI designed for your phone — open the Pi's IP in a browser and you're done
+- **Upload sound memories from your phone** — open the web UI, tap `+`, pick a voice memo. Supports M4A, MP3, WAV, OGG, AAC, and FLAC.
+- **Seamless crossfade looping** — recordings are automatically crossfaded at the loop boundary so a 30-second voice memo plays all night without any audible cut.
+- **Built-in nature sounds** — four procedural generators (ocean surf, warm rain, creek, night wind) for when you don't have a recording handy.
+- **Sleep timer** with presets from 1 minute to 8 hours.
+- **Schedule** — set a nightly window (e.g. 22:00–07:00) and it starts and stops automatically.
+- **Web UI designed for your phone** — dark, minimal, runs on your local network.
 
 ## Hardware
 
@@ -27,9 +34,15 @@ cargo build --release
 
 Open `http://<pi-ip>:8080` on your phone.
 
-### Custom sounds
+### Uploading sounds
 
-Put `.wav` or `.ogg` files in a `sounds/` directory:
+Open the web UI on your phone, tap the sounds button, and hit the `+` pill at the bottom. Pick a voice memo or audio file — it gets uploaded, decoded, crossfade-looped, and is ready to play immediately.
+
+Supported formats: `.m4a`, `.mp3`, `.wav`, `.ogg`, `.aac`, `.flac`
+
+### Custom sounds (manual)
+
+You can also drop audio files directly into the `sounds/` directory:
 
 ```bash
 ./target/release/noisey --sounds-dir ~/my-sounds
@@ -65,12 +78,16 @@ Everything the web UI does goes through a simple REST API:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/status` | Full device status |
 | `GET` | `/api/sounds` | List all sounds with state |
 | `POST` | `/api/sounds/:id/toggle` | Toggle a sound on/off |
-| `POST` | `/api/sounds/:id/volume` | Set volume `{ "volume": 0.7 }` |
-| `POST` | `/api/master-volume` | Set master volume `{ "volume": 0.8 }` |
+| `POST` | `/api/sounds/upload` | Upload a sound memory (multipart form) |
+| `DELETE` | `/api/sounds/:id` | Delete a custom sound |
+| `POST` | `/api/volume` | Set master volume `{ "volume": 0.8 }` |
 | `POST` | `/api/sleep-timer` | Set timer `{ "minutes": 60 }` (0 to cancel) |
-| `GET` | `/api/status` | Full device status |
+| `GET` | `/api/schedule` | Get current schedule |
+| `POST` | `/api/schedule` | Set schedule |
+| `DELETE` | `/api/schedule` | Clear schedule |
 
 ## License
 
