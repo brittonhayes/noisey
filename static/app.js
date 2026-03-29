@@ -3,6 +3,7 @@ const POLL_INTERVAL = 2000;
 let state = null;
 let debounceTimers = {};
 let soundsCreated = false;
+let lastSoundsKey = '';
 let currentVolLevel = 1;
 let playing = false;
 let activeSoundId = null;
@@ -297,7 +298,12 @@ function renderSounds(sounds) {
         activeSoundId = activeSound.id;
     }
 
-    // Always rebuild to handle dynamic adds/deletes from uploads
+    // Build a fingerprint so we can skip full rebuilds when nothing changed
+    const soundsKey = sounds.map(s => s.id + ':' + (s.active ? '1' : '0')).join(',');
+    if (soundsKey === lastSoundsKey) return;
+    lastSoundsKey = soundsKey;
+
+    // Rebuild to handle dynamic adds/deletes from uploads
     container.innerHTML = '';
     sounds.forEach(sound => {
         const pill = document.createElement('button');
@@ -378,13 +384,20 @@ document.getElementById('upload-file-input').addEventListener('change', async (e
             body: formData,
         });
 
-        if (!res.ok) throw new Error('Upload failed: HTTP ' + res.status);
+        if (!res.ok) {
+            let msg = 'Upload failed';
+            try {
+                const body = await res.json();
+                if (body.error) msg = body.error;
+            } catch (_) {}
+            throw new Error(msg);
+        }
 
         // Re-poll to get updated catalog
         await poll();
     } catch (err) {
         console.error('Upload failed:', err);
-        alert('Upload failed. Make sure the file is a supported audio format.');
+        alert(err.message || 'Upload failed');
     } finally {
         e.target.value = '';
         if (uploadPill) {

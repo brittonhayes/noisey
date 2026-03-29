@@ -355,7 +355,7 @@ fn load_sound_file(sounds_dir: &Path, id: &str) -> Option<DecodedAudio> {
     for ext in AUDIO_EXTENSIONS {
         let path = sounds_dir.join(format!("{id}.{ext}"));
         if path.exists() {
-            return decode_file(&path);
+            return decode_file(&path).ok();
         }
     }
 
@@ -367,7 +367,7 @@ fn load_sound_file(sounds_dir: &Path, id: &str) -> Option<DecodedAudio> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string());
             if stem.as_deref() == Some(id) {
-                return decode_file(&entry.path());
+                return decode_file(&entry.path()).ok();
             }
         }
     }
@@ -376,28 +376,35 @@ fn load_sound_file(sounds_dir: &Path, id: &str) -> Option<DecodedAudio> {
 }
 
 /// Public wrapper for decoding a file (used by upload validation).
-pub fn decode_file_from_path(path: &Path) -> Option<DecodedAudio> {
+/// Returns a descriptive error string on failure.
+pub fn decode_file_from_path(path: &Path) -> Result<DecodedAudio, String> {
     decode_file(path)
 }
 
-fn decode_file(path: &Path) -> Option<DecodedAudio> {
-    let ext = path.extension()?.to_str()?.to_lowercase();
+fn decode_file(path: &Path) -> Result<DecodedAudio, String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| "file has no extension".to_string())?;
     if !AUDIO_EXTENSIONS.contains(&ext.as_str()) {
-        warn!("Unsupported audio format: {ext}");
-        return None;
+        return Err(format!("unsupported audio format: {ext}"));
     }
     decode_with_symphonia(path)
 }
 
 /// Decode any supported audio file using symphonia, resample to SAMPLE_RATE if needed,
 /// and bake a crossfade into the loop boundary for seamless looping.
-fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
-    let file = std::fs::File::open(path).ok()?;
+fn decode_with_symphonia(path: &Path) -> Result<DecodedAudio, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("could not open file: {e}"))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
+        // Symphonia's isomp4 demuxer registers "mp4" not "m4a", so remap for probe
+        let lower = ext.to_lowercase();
+        let ext_hint = if lower == "m4a" { "mp4" } else { &lower };
+        hint.with_extension(ext_hint);
     }
 
     let probed = symphonia::default::get_probe()
@@ -407,14 +414,15 @@ fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .ok()?;
+        .map_err(|e| format!("could not identify audio format: {e}"))?;
 
     let mut format_reader = probed.format;
 
     let track = format_reader
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)?;
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .ok_or_else(|| "no supported audio track found in file".to_string())?;
 
     let codec_params = track.codec_params.clone();
     let track_id = track.id;
@@ -424,9 +432,10 @@ fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())
-        .ok()?;
+        .map_err(|e| format!("unsupported codec: {e}"))?;
 
     let mut samples: Vec<f32> = Vec::new();
+    let mut decode_errors: usize = 0;
 
     loop {
         let packet = match format_reader.next_packet() {
@@ -445,7 +454,13 @@ fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
 
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => {
+                decode_errors += 1;
+                if decode_errors <= 3 {
+                    warn!(path = %path.display(), error = %e, "Audio decode: packet error");
+                }
+                continue;
+            }
         };
 
         let spec = *decoded.spec();
@@ -455,9 +470,13 @@ fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
         samples.extend_from_slice(sample_buf.samples());
     }
 
+    if decode_errors > 0 {
+        warn!(path = %path.display(), errors = decode_errors, "Audio decode: total packet errors");
+    }
+
     if samples.is_empty() {
         warn!(path = %path.display(), "Audio engine: decoded 0 samples");
-        return None;
+        return Err("could not decode any audio samples from file".to_string());
     }
 
     // Resample if source rate differs from our engine rate
@@ -476,7 +495,7 @@ fn decode_with_symphonia(path: &Path) -> Option<DecodedAudio> {
     // Bake crossfade for seamless looping
     samples = bake_crossfade(samples, channels);
 
-    Some(DecodedAudio { samples, channels })
+    Ok(DecodedAudio { samples, channels })
 }
 
 /// Simple linear resampler for converting between sample rates.

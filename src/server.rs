@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
+use axum::extract::DefaultBodyLimit;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, warn};
 
@@ -27,14 +28,16 @@ struct StaticAssets;
 pub type SharedState = Arc<RwLock<AppState>>;
 
 pub fn create_router(state: SharedState) -> Router {
+    let upload_router = Router::new()
+        .route("/api/sounds/upload", post(upload_sound))
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .layer(RequestBodyLimitLayer::new(100 * 1024 * 1024)); // 100MB
+
     let router = Router::new()
         .route("/", get(index_handler))
         .route("/api/sounds", get(list_sounds))
         .route("/api/sounds/{id}/toggle", post(toggle_sound))
-        .route(
-            "/api/sounds/upload",
-            post(upload_sound).layer(RequestBodyLimitLayer::new(100 * 1024 * 1024)), // 100MB
-        )
+        .merge(upload_router)
         .route("/api/sounds/{id}", delete(delete_sound))
         .route("/api/volume", post(set_volume))
         .route("/api/sleep-timer", post(set_sleep_timer))
@@ -136,28 +139,41 @@ async fn toggle_sound(
     Ok(Json(state.status()))
 }
 
+/// JSON error response for upload failures.
+#[derive(serde::Serialize)]
+struct UploadError {
+    error: String,
+}
+
+fn upload_err(status: StatusCode, msg: impl Into<String>) -> Response {
+    let body = UploadError {
+        error: msg.into(),
+    };
+    (status, Json(body)).into_response()
+}
+
 /// Upload a sound file (multipart/form-data).
 /// Fields: `file` (required), `name` (optional display name).
 async fn upload_sound(
     State(state): State<SharedState>,
     mut multipart: Multipart,
-) -> Result<Json<SoundEntry>, StatusCode> {
+) -> Response {
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
     let mut display_name: Option<String> = None;
     let mut description: Option<String> = None;
 
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?
-    {
+    while let Some(field) = multipart.next_field().await.ok().flatten() {
         let field_name = field.name().unwrap_or("").to_string();
         match field_name.as_str() {
             "file" => {
                 file_name = field.file_name().map(|s| s.to_string());
-                let bytes = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-                file_data = Some(bytes.to_vec());
+                match field.bytes().await {
+                    Ok(bytes) => file_data = Some(bytes.to_vec()),
+                    Err(_) => {
+                        return upload_err(StatusCode::BAD_REQUEST, "failed to read file data")
+                    }
+                }
             }
             "name" => {
                 let text = field.text().await.unwrap_or_default();
@@ -175,19 +191,34 @@ async fn upload_sound(
         }
     }
 
-    let data = file_data.ok_or(StatusCode::BAD_REQUEST)?;
-    let original_name = file_name.ok_or(StatusCode::BAD_REQUEST)?;
+    let data = match file_data {
+        Some(d) => d,
+        None => return upload_err(StatusCode::BAD_REQUEST, "no file provided"),
+    };
+    let original_name = match file_name {
+        Some(n) => n,
+        None => return upload_err(StatusCode::BAD_REQUEST, "file has no name"),
+    };
 
     // Extract extension and validate
-    let ext = std::path::Path::new(&original_name)
+    let ext = match std::path::Path::new(&original_name)
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    {
+        Some(e) => e,
+        None => return upload_err(StatusCode::BAD_REQUEST, "file has no extension"),
+    };
 
     if !AUDIO_EXTENSIONS.contains(&ext.as_str()) {
         warn!(ext = %ext, "Upload rejected: unsupported format");
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        return upload_err(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            format!(
+                "unsupported format: .{ext} (supported: {})",
+                AUDIO_EXTENSIONS.join(", ")
+            ),
+        );
     }
 
     // Generate a sanitized ID from the filename
@@ -208,20 +239,28 @@ async fn upload_sound(
     let file_path = sounds_dir.join(format!("{id}.{ext}"));
 
     // Write file to disk
-    std::fs::write(&file_path, &data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Validate that symphonia can decode it
-    let decoded = audio::decode_file_from_path(&file_path);
-    if decoded.is_none() {
-        // Clean up invalid file
-        let _ = std::fs::remove_file(&file_path);
-        warn!(path = %file_path.display(), "Upload rejected: could not decode audio");
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    if let Err(e) = std::fs::write(&file_path, &data) {
+        return upload_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to save file: {e}"),
+        );
     }
 
-    let dur = decoded
-        .as_ref()
-        .map(|d| audio::duration_secs(d.samples.len(), d.channels));
+    // Validate that symphonia can decode it
+    let decoded = match audio::decode_file_from_path(&file_path) {
+        Ok(d) => d,
+        Err(reason) => {
+            // Clean up invalid file
+            let _ = std::fs::remove_file(&file_path);
+            warn!(path = %file_path.display(), reason = %reason, "Upload rejected: decode failed");
+            return upload_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("could not decode audio: {reason}"),
+            );
+        }
+    };
+
+    let dur = Some(audio::duration_secs(decoded.samples.len(), decoded.channels));
 
     // Determine display name
     let name = display_name
@@ -261,7 +300,7 @@ async fn upload_sound(
 
     info!(id = %id, "API: sound uploaded");
 
-    Ok(Json(entry))
+    Json(entry).into_response()
 }
 
 /// Delete a custom sound by ID.
