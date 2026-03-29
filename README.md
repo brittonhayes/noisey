@@ -15,10 +15,6 @@ Built in Rust. Single binary. No dependencies to install on the Pi.
 - Schedule — set a nightly window (e.g. 22:00–07:00) and it starts and stops automatically
 - Web UI designed for your phone — open the Pi's IP in a browser and you're done
 
-<p align="center">
-  <img src="./.github/assets/iOSnoisey.gif" alt="Demo" width="300" />
-</p>
-
 ## Hardware
 
 This was built for a **Raspberry Pi Zero W** with a small 3" speaker in a compact enclosure. That's the whole thing — Pi, speaker, power cable.
