@@ -1,0 +1,15 @@
+[tasks.build]
+description = "Build the iOS app for simulator"
+run = "xcodebuild -project Noisey.xcodeproj -scheme Noisey -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "xcodebuild -project Noisey.xcodeproj -scheme Noisey clean"
+
+[tasks.open]
+description = "Open project in Xcode"
+run = "open Noisey.xcodeproj"
+
+[tasks.sim]
+description = "Build and run in iOS Simulator"
+run = "xcodebuild -project Noisey.xcodeproj -scheme Noisey -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build && xcrun simctl boot 'iPhone 17 Pro' 2>/dev/null; xcrun simctl install 'iPhone 17 Pro' $(xcodebuild -project Noisey.xcodeproj -scheme Noisey -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -showBuildSettings 2>/dev/null | grep -m1 BUILT_PRODUCTS_DIR | awk '{print $3}')/Noisey.app && xcrun simctl launch 'iPhone 17 Pro' com.noisey.app"
