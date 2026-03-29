@@ -166,7 +166,7 @@ fn run_audio_engine(
     } else {
         match try_open_device(Arc::clone(&mixer)) {
             Some(dev) => {
-                info!("Audio engine: playback device opened (miniaudio)");
+                info!("Audio engine: playback device opened (cpal)");
                 let _ = sim_tx.send(false);
                 Some(dev)
             }
@@ -205,69 +205,80 @@ fn run_audio_engine(
     Ok(())
 }
 
-fn try_open_device(mixer: Arc<Mutex<MixerState>>) -> Option<miniaudio::Device> {
-    let mut device_config = miniaudio::DeviceConfig::new(miniaudio::DeviceType::Playback);
-    device_config
-        .playback_mut()
-        .set_format(miniaudio::Format::F32);
-    device_config.playback_mut().set_channels(2);
-    device_config.set_sample_rate(SAMPLE_RATE);
+fn try_open_device(mixer: Arc<Mutex<MixerState>>) -> Option<cpal::Stream> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-    device_config.set_data_callback(move |_device, output, _input| {
-        let output_f32 = output.as_samples_mut::<f32>();
-        for s in output_f32.iter_mut() {
-            *s = 0.0;
-        }
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
 
-        let mut state = match mixer.lock() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+    let config = cpal::StreamConfig {
+        channels: 2,
+        sample_rate: cpal::SampleRate(SAMPLE_RATE),
+        buffer_size: cpal::BufferSize::Default,
+    };
 
-        if state.sounds.is_empty() && state.master_volume.is_settled() {
-            return;
-        }
+    let stream = device
+        .build_output_stream(
+            &config,
+            move |output_f32: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                for s in output_f32.iter_mut() {
+                    *s = 0.0;
+                }
 
-        let frame_count = output_f32.len() / 2;
-        let mut mono_buf = vec![0.0f32; frame_count];
+                let mut state = match mixer.lock() {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
 
-        // Pre-compute per-frame master volume ramp to avoid borrow conflict
-        let mut master_ramp = Vec::with_capacity(frame_count);
-        for _ in 0..frame_count {
-            master_ramp.push(state.master_volume.next());
-        }
+                if state.sounds.is_empty() && state.master_volume.is_settled() {
+                    return;
+                }
 
-        for active in state.sounds.values_mut() {
-            active.source.fill(&mut mono_buf);
-            for (i, &sample) in mono_buf.iter().enumerate() {
-                let vol = active.volume.next();
-                let fade = (active.fade + active.fade_delta).clamp(0.0, 1.0);
-                active.fade = fade;
-                let scaled = sample * vol * fade * master_ramp[i];
-                output_f32[i * 2] += scaled;
-                output_f32[i * 2 + 1] += scaled;
-            }
-        }
+                let frame_count = output_f32.len() / 2;
+                let mut mono_buf = vec![0.0f32; frame_count];
 
-        // Remove sounds whose fade-out has completed
-        state
-            .sounds
-            .retain(|_, active| !(active.pending_remove && active.fade <= 0.0));
+                // Pre-compute per-frame master volume ramp to avoid borrow conflict
+                let mut master_ramp = Vec::with_capacity(frame_count);
+                for _ in 0..frame_count {
+                    master_ramp.push(state.master_volume.next());
+                }
 
-        // Apply warmth filter (post-mix, pre-clamp)
-        for i in 0..frame_count {
-            output_f32[i * 2] = state.warmth_filter_l.process(output_f32[i * 2]);
-            output_f32[i * 2 + 1] = state.warmth_filter_r.process(output_f32[i * 2 + 1]);
-        }
+                for active in state.sounds.values_mut() {
+                    active.source.fill(&mut mono_buf);
+                    for (i, &sample) in mono_buf.iter().enumerate() {
+                        let vol = active.volume.next();
+                        let fade = (active.fade + active.fade_delta).clamp(0.0, 1.0);
+                        active.fade = fade;
+                        let scaled = sample * vol * fade * master_ramp[i];
+                        output_f32[i * 2] += scaled;
+                        output_f32[i * 2 + 1] += scaled;
+                    }
+                }
 
-        for s in output_f32.iter_mut() {
-            *s = s.clamp(-1.0, 1.0);
-        }
-    });
+                // Remove sounds whose fade-out has completed
+                state
+                    .sounds
+                    .retain(|_, active| !(active.pending_remove && active.fade <= 0.0));
 
-    let device = miniaudio::Device::new(None, &device_config).ok()?;
-    device.start().ok()?;
-    Some(device)
+                // Apply warmth filter (post-mix, pre-clamp)
+                for i in 0..frame_count {
+                    output_f32[i * 2] = state.warmth_filter_l.process(output_f32[i * 2]);
+                    output_f32[i * 2 + 1] = state.warmth_filter_r.process(output_f32[i * 2 + 1]);
+                }
+
+                for s in output_f32.iter_mut() {
+                    *s = s.clamp(-1.0, 1.0);
+                }
+            },
+            |err| {
+                error!("Audio stream error: {err}");
+            },
+            None,
+        )
+        .ok()?;
+
+    stream.play().ok()?;
+    Some(stream)
 }
 
 fn process_commands(
