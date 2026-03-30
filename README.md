@@ -6,11 +6,11 @@ Built in Rust. Single binary. No dependencies to install on the Pi.
 
 ## What it does
 
-- Generates white, pink, and brown noise procedurally
+- Generates procedural ambient soundscapes — Ocean Surf, Warm Rain, Creek, and Night Wind
 - Plays `.wav` and `.ogg` sound files you provide (rain, wind, whatever you want)
 - **Upload recordings from your phone** — open the web UI, tap `+`, pick a voice memo or audio file. Supports M4A, MP3, WAV, OGG, AAC, and FLAC.
 - Uploads are automatically crossfade-looped so a short recording plays all night without an audible cut
-- Mixes multiple sounds with independent volume controls
+- Mixes multiple sounds with a master volume control
 - Sleep timer with presets from 1 minute to 8 hours
 - Schedule — set a nightly window (e.g. 22:00–07:00) and it starts and stops automatically
 - Web UI designed for your phone — open the Pi's IP in a browser and you're done
@@ -53,7 +53,7 @@ Cross-compile from your dev machine:
 ```bash
 cargo install cross --git https://github.com/cross-rs/cross
 ./cross-compile.sh           # aarch64 (Pi Zero 2 W, Pi 3/4/5)
-./cross-compile.sh armv7     # armv7 (Pi Zero W, Pi 2/3)
+./cross-compile.sh armv7     # armv7 (Pi 2/3)
 ```
 
 Copy to the Pi and run as a service:
