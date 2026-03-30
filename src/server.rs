@@ -2,6 +2,7 @@ use crate::audio::{self, AUDIO_EXTENSIONS};
 use crate::state::{
     AudioCommand, Schedule, SleepTimer, SoundCategory, SoundEntry, SoundMeta, StatusResponse,
 };
+use axum::extract::DefaultBodyLimit;
 use axum::{
     extract::{Multipart, Path, State},
     http::{header, StatusCode},
@@ -15,7 +16,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
-use axum::extract::DefaultBodyLimit;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{info, warn};
 
@@ -49,13 +49,33 @@ pub fn create_router(state: SharedState) -> Router {
     #[cfg(feature = "eink")]
     let router = router.route("/api/display/preview", get(display_preview));
 
+    #[cfg(feature = "wifi")]
+    let router = router
+        .route("/api/wifi/status", get(wifi_status))
+        .route("/api/wifi/scan", get(wifi_scan))
+        .route("/api/wifi/connect", post(wifi_connect))
+        .route("/api/wifi/setup", post(wifi_enter_setup));
+
     router
         .route("/{*path}", get(static_handler))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
-async fn index_handler() -> impl IntoResponse {
+async fn index_handler(State(state): State<SharedState>) -> impl IntoResponse {
+    #[cfg(feature = "wifi")]
+    {
+        let s = state.read().await;
+        let ws = s.wifi_state.read().await;
+        if matches!(*ws, crate::wifi::WifiState::AccessPoint) {
+            drop(ws);
+            drop(s);
+            return axum::response::Redirect::temporary("/setup.html").into_response();
+        }
+    }
+
+    let _ = &state; // suppress unused warning without wifi feature
+
     match StaticAssets::get("index.html") {
         Some(content) => Html(String::from_utf8_lossy(&content.data).to_string()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -146,18 +166,13 @@ struct UploadError {
 }
 
 fn upload_err(status: StatusCode, msg: impl Into<String>) -> Response {
-    let body = UploadError {
-        error: msg.into(),
-    };
+    let body = UploadError { error: msg.into() };
     (status, Json(body)).into_response()
 }
 
 /// Upload a sound file (multipart/form-data).
 /// Fields: `file` (required), `name` (optional display name).
-async fn upload_sound(
-    State(state): State<SharedState>,
-    mut multipart: Multipart,
-) -> Response {
+async fn upload_sound(State(state): State<SharedState>, mut multipart: Multipart) -> Response {
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
     let mut display_name: Option<String> = None;
@@ -260,7 +275,10 @@ async fn upload_sound(
         }
     };
 
-    let dur = Some(audio::duration_secs(decoded.samples.len(), decoded.channels));
+    let dur = Some(audio::duration_secs(
+        decoded.samples.len(),
+        decoded.channels,
+    ));
 
     // Determine display name
     let name = display_name
@@ -495,4 +513,96 @@ async fn display_preview(State(state): State<SharedState>) -> impl IntoResponse 
         .body(axum::body::Body::from(bmp))
         .unwrap()
         .into_response()
+}
+
+// ========================================
+// WIFI SETUP
+// ========================================
+
+#[cfg(feature = "wifi")]
+async fn wifi_status(State(state): State<SharedState>) -> Json<crate::wifi::WifiState> {
+    let s = state.read().await;
+    let ws = s.wifi_state.read().await;
+    Json(ws.clone())
+}
+
+#[cfg(feature = "wifi")]
+async fn wifi_scan() -> Json<Vec<crate::wifi::WifiNetwork>> {
+    let networks = crate::wifi::scan_networks().await;
+    Json(networks)
+}
+
+#[cfg(feature = "wifi")]
+#[derive(Deserialize)]
+struct WifiConnectRequest {
+    ssid: String,
+    password: String,
+}
+
+#[cfg(feature = "wifi")]
+async fn wifi_connect(
+    State(state): State<SharedState>,
+    Json(body): Json<WifiConnectRequest>,
+) -> Result<Json<crate::wifi::WifiState>, StatusCode> {
+    let wifi_state = {
+        let s = state.read().await;
+        s.wifi_state.clone()
+    };
+
+    // Update state to connecting
+    *wifi_state.write().await = crate::wifi::WifiState::Connecting {
+        ssid: body.ssid.clone(),
+    };
+
+    // Stop hotspot first so the interface is free
+    let _ = crate::wifi::stop_hotspot().await;
+
+    // Attempt connection
+    match crate::wifi::connect(&body.ssid, &body.password).await {
+        Ok(()) => {
+            // Wait briefly for IP assignment
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let ip = crate::wifi::get_device_ip()
+                .await
+                .unwrap_or_else(|| "unknown".to_string());
+            let new_state = crate::wifi::WifiState::Connected { ip };
+            *wifi_state.write().await = new_state.clone();
+            info!("WiFi: connected successfully");
+            Ok(Json(new_state))
+        }
+        Err(reason) => {
+            warn!(reason = %reason, "WiFi: connection failed, restarting hotspot");
+            let new_state = crate::wifi::WifiState::Failed {
+                reason: reason.clone(),
+            };
+            *wifi_state.write().await = new_state.clone();
+            // Restart hotspot so user can retry
+            let _ = crate::wifi::start_hotspot().await;
+            *wifi_state.write().await = crate::wifi::WifiState::AccessPoint;
+            Ok(Json(crate::wifi::WifiState::Failed { reason }))
+        }
+    }
+}
+
+#[cfg(feature = "wifi")]
+async fn wifi_enter_setup(
+    State(state): State<SharedState>,
+) -> Result<Json<crate::wifi::WifiState>, StatusCode> {
+    let wifi_state = {
+        let s = state.read().await;
+        s.wifi_state.clone()
+    };
+
+    info!("WiFi: entering setup mode via API");
+
+    match crate::wifi::start_hotspot().await {
+        Ok(()) => {
+            *wifi_state.write().await = crate::wifi::WifiState::AccessPoint;
+            Ok(Json(crate::wifi::WifiState::AccessPoint))
+        }
+        Err(e) => {
+            warn!(reason = %e, "WiFi: failed to start hotspot");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }

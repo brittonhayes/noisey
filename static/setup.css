@@ -1,0 +1,331 @@
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg: #111111;
+    --surface: #191919;
+    --text: #d4d4d4;
+    --text-mid: #777777;
+    --text-dim: #444444;
+    --white: #e0e0e0;
+    --accent: #6366f1;
+    --accent-dim: #4f46e5;
+    --success: #4ade80;
+    --error: #f87171;
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font: 'Inter', sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html {
+    font-size: 16px;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    -webkit-font-smoothing: antialiased;
+}
+
+.setup-container {
+    width: 100%;
+    max-width: 420px;
+    padding: 2rem 1.25rem;
+}
+
+.setup-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.logo {
+    font-family: var(--mono);
+    font-size: 2rem;
+    font-weight: 500;
+    color: var(--white);
+    letter-spacing: -0.02em;
+}
+
+.subtitle {
+    color: var(--text-mid);
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+}
+
+/* Status Banner */
+.status-banner {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    text-align: center;
+    transition: all 0.3s var(--ease);
+}
+
+.status-banner.connecting {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.status-banner.error {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--error);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.status-banner.success {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+/* Section */
+.section {
+    margin-bottom: 1.5rem;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.section h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--white);
+}
+
+/* Network List */
+.network-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.network-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.875rem 1rem;
+    cursor: pointer;
+    transition: background 0.15s var(--ease);
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 0.9375rem;
+    width: 100%;
+    text-align: left;
+}
+
+.network-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.network-item:active {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.network-name {
+    font-weight: 400;
+}
+
+.network-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-mid);
+    font-size: 0.8125rem;
+}
+
+.signal-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 14px;
+}
+
+.signal-bar {
+    width: 3px;
+    background: var(--text-dim);
+    border-radius: 1px;
+}
+
+.signal-bar.active {
+    background: var(--text-mid);
+}
+
+.signal-bar:nth-child(1) { height: 4px; }
+.signal-bar:nth-child(2) { height: 7px; }
+.signal-bar:nth-child(3) { height: 10px; }
+.signal-bar:nth-child(4) { height: 14px; }
+
+.lock-icon {
+    opacity: 0.5;
+}
+
+.loading {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-mid);
+    font-size: 0.875rem;
+}
+
+/* Connect Form */
+.input-group {
+    margin-bottom: 1.25rem;
+}
+
+.input-group label {
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--text-mid);
+    margin-bottom: 0.5rem;
+}
+
+.input-group input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--text-dim);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s var(--ease);
+}
+
+.input-group input:focus {
+    border-color: var(--accent);
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+}
+
+/* Buttons */
+.btn {
+    flex: 1;
+    padding: 0.75rem 1.25rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s var(--ease);
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--accent-dim);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--text-dim);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    color: var(--text-mid);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+    transition: color 0.15s var(--ease);
+}
+
+.btn-icon:hover {
+    color: var(--text);
+}
+
+.btn-icon.spinning svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Success */
+.success-content {
+    text-align: center;
+    padding: 2rem 0;
+}
+
+.success-content svg {
+    margin-bottom: 1rem;
+}
+
+.success-content h2 {
+    font-size: 1.25rem;
+    color: var(--success);
+    margin-bottom: 0.5rem;
+}
+
+.success-content p {
+    color: var(--text-mid);
+    font-size: 0.9375rem;
+    margin-bottom: 0.5rem;
+}
+
+.ip-display {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    color: var(--white);
+}
+
+.ip-display strong {
+    color: var(--accent);
+}
+
+.hint {
+    margin-top: 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-dim);
+}
+
+/* Utility */
+.hidden {
+    display: none !important;
+}

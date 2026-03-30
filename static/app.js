@@ -603,3 +603,27 @@ async function poll() {
 
 poll();
 setInterval(poll, POLL_INTERVAL);
+
+// ========================================
+// WIFI RECONFIGURE
+// ========================================
+
+(async function initWifi() {
+    try {
+        const res = await fetch('/api/wifi/status');
+        if (res.ok) {
+            document.getElementById('wifi-section').style.display = '';
+            document.getElementById('wifi-setup-btn').addEventListener('click', async function () {
+                if (!confirm('This will disconnect from your current WiFi and start the setup hotspot. Continue?')) return;
+                try {
+                    await api('POST', '/api/wifi/setup');
+                    alert('Setup mode activated. Connect to the "Noisey-Setup" WiFi network and visit http://10.42.0.1:8080');
+                } catch (e) {
+                    alert('Failed to enter setup mode.');
+                }
+            });
+        }
+    } catch (e) {
+        // WiFi feature not available, keep section hidden
+    }
+})();
