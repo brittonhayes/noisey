@@ -4,6 +4,8 @@ mod display;
 mod noise;
 mod server;
 mod state;
+#[cfg(feature = "wifi")]
+mod wifi;
 
 use crate::audio::{scan_sound_files, spawn_audio_thread};
 #[cfg(feature = "eink")]
@@ -18,6 +20,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tracing::info;
+#[cfg(feature = "wifi")]
+use tracing::warn;
 
 #[derive(Parser)]
 #[command(name = "noisey", about = "IoT ambient noise machine")]
@@ -45,6 +49,11 @@ struct Args {
     /// Run in simulation mode (no audio hardware required)
     #[arg(long, default_value = "false")]
     simulate: bool,
+
+    /// Force WiFi setup mode (start hotspot for configuration)
+    #[cfg(feature = "wifi")]
+    #[arg(long, default_value = "false")]
+    setup: bool,
 }
 
 /// Path to the schedule config file.
@@ -160,6 +169,47 @@ async fn main() {
         );
     }
 
+    // WiFi setup mode: check connectivity and start hotspot if needed
+    #[cfg(feature = "wifi")]
+    let wifi_state: wifi::SharedWifiState = {
+        use std::sync::Arc as StdArc;
+        let initial = if args.setup {
+            info!("WiFi: --setup flag set, forcing setup mode");
+            wifi::WifiState::Unknown
+        } else {
+            wifi::WifiState::Unknown
+        };
+        StdArc::new(RwLock::new(initial))
+    };
+
+    #[cfg(feature = "wifi")]
+    {
+        let needs_setup = args.setup || !wifi::check_connectivity().await;
+        if needs_setup {
+            match wifi::start_hotspot().await {
+                Ok(()) => {
+                    *wifi_state.write().await = wifi::WifiState::AccessPoint;
+                    info!(
+                        ssid = wifi::HOTSPOT_SSID,
+                        password = wifi::HOTSPOT_PASSWORD,
+                        "WiFi: setup mode active — connect to '{}' (password: '{}') then visit http://10.42.0.1:{}",
+                        wifi::HOTSPOT_SSID,
+                        wifi::HOTSPOT_PASSWORD,
+                        args.port,
+                    );
+                }
+                Err(e) => {
+                    warn!("WiFi: failed to start hotspot: {e}");
+                    *wifi_state.write().await = wifi::WifiState::Failed { reason: e };
+                }
+            }
+        } else {
+            let ip = wifi::get_device_ip().await.unwrap_or_default();
+            info!(ip = %ip, "WiFi: already connected");
+            *wifi_state.write().await = wifi::WifiState::Connected { ip };
+        }
+    }
+
     // Shared application state
     let state: SharedState = Arc::new(RwLock::new(AppState {
         sounds,
@@ -169,6 +219,8 @@ async fn main() {
         audio_tx,
         simulate,
         sounds_dir: args.sounds_dir.clone(),
+        #[cfg(feature = "wifi")]
+        wifi_state: wifi_state.clone(),
     }));
 
     // Spawn sleep timer watcher

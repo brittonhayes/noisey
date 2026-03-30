@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+#[cfg(feature = "wifi")]
+use crate::wifi;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SoundCategory {
@@ -45,6 +48,8 @@ pub struct AppState {
     pub audio_tx: mpsc::Sender<AudioCommand>,
     pub simulate: bool,
     pub sounds_dir: std::path::PathBuf,
+    #[cfg(feature = "wifi")]
+    pub wifi_state: wifi::SharedWifiState,
 }
 
 #[derive(Debug)]
@@ -73,6 +78,9 @@ pub struct StatusResponse {
     pub sleep_timer: Option<TimerStatus>,
     pub schedule: Option<Schedule>,
     pub simulate: bool,
+    #[cfg(feature = "wifi")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wifi: Option<wifi::WifiState>,
 }
 
 #[derive(Serialize)]
@@ -97,6 +105,8 @@ impl AppState {
             sleep_timer,
             schedule: self.schedule.clone(),
             simulate: self.simulate,
+            #[cfg(feature = "wifi")]
+            wifi: None, // WiFi state is populated by the wifi routes separately
         }
     }
 }

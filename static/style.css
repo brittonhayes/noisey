@@ -761,6 +761,24 @@ body {
     }
 }
 
+.wifi-setup-btn {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    background: var(--toggle-off);
+    border: 1px solid var(--text-dim);
+    border-radius: var(--radius-sm);
+    color: var(--text-mid);
+    font-family: var(--font);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: all 0.15s var(--ease);
+}
+
+.wifi-setup-btn:hover {
+    color: var(--text);
+    border-color: var(--text-mid);
+}
+
 @supports (-webkit-touch-callout: none) {
     body {
         position: fixed;

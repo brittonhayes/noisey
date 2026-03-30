@@ -1,15 +1,22 @@
 [Unit]
 Description=Noisey - Ambient Sound Machine
+# When built with --features wifi, the device manages its own network
+# so network-online.target dependency is not strictly required.
+# Keep it for non-wifi builds where the network must be pre-configured.
 After=sound.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+# For WiFi setup mode builds, add --setup to force AP mode on boot:
+# ExecStart=/usr/local/bin/noisey --sounds-dir /home/pi/sounds --setup
 ExecStart=/usr/local/bin/noisey --sounds-dir /home/pi/sounds
 Restart=always
 RestartSec=5
 User=pi
 Group=audio
+# NetworkManager access requires the 'netdev' group on some systems
+SupplementaryGroups=netdev
 Environment=RUST_LOG=noisey=info
 
 [Install]

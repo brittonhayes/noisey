@@ -8,6 +8,7 @@ license = "GPL-2.0"
 [features]
 default = []
 eink = []
+wifi = []
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
