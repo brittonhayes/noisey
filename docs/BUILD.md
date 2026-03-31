@@ -14,7 +14,7 @@ A dedicated IoT white noise machine you control from your phone — built with a
     │    ○ ○ ○ ○ ○ ○ ○  grille     │
     │              ┌─┐             │
     └──────────────│U│─────────────┘
-                   └─┘ USB-C
+                   └─┘ Mini USB
 ```
 
 **What you get:**
@@ -33,7 +33,7 @@ A dedicated IoT white noise machine you control from your phone — built with a
 | I2S DAC + Amp | [Adafruit MAX98357A](https://www.adafruit.com/product/3006) | $6 |
 | Speaker | [3W 4Ω Speaker](https://www.adafruit.com/product/1314) | $8 |
 | MicroSD card | Any 8GB+ Class 10 | $6 |
-| USB-C power supply | 5V 2.5A | $8 |
+| Mini USB power supply | 5V 2.5A (Mini USB) | $8 |
 | Enclosure | Wooden box or repurposed item (see below) | $0–15 |
 | **Total** | | **~$43–58** |
 
@@ -252,7 +252,7 @@ The goal is simple: a clean box that hides the electronics and lets the speaker 
 A small unfinished wooden box from a craft store (roughly 10 × 13 × 5 cm).
 
 1. **Speaker grille** — drill a grid of 3–4mm holes in the top or front panel for sound to exit
-2. **Power port** — drill or file a slot in the back panel for the USB-C cable
+2. **Power port** — drill or file a slot in the back panel for the Mini USB cable
 3. **Mount the speaker** — hot glue or screw it behind the drilled holes, facing outward
 4. **Mount the boards** — attach the Pi and MAX98357A with foam tape, standoffs, or small screws
 5. **Line the interior** with a scrap of felt to dampen rattles
@@ -286,7 +286,7 @@ Cut six pieces of 6mm plywood or pine and glue them into a box. Sand, stain, don
 - **Ventilation** — leave a few small gaps or drill vent holes to prevent overheating
 - **MicroSD access** — position the Pi so you can reach the card slot, or use a microSD extension cable
 - **Speaker placement** — the speaker sounds best facing an opening with a small sealed air chamber behind it
-- **Cable routing** — size the USB-C hole snugly around the cable for a clean look
+- **Cable routing** — size the Mini USB hole snugly around the cable for a clean look
 - **Secure the boards** — foam mounting tape works well and dampens vibration
 
 ## Using Noisey
