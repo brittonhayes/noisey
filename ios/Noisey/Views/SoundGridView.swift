@@ -39,10 +39,10 @@ struct SoundGridView: View {
                     sound: sound,
                     isActive: sound.active,
                     onTap: {
-                        Task { await store.toggleSound(id: sound.id) }
+                        store.toggleSound(id: sound.id)
                     },
                     onDelete: sound.category == .custom ? {
-                        Task { await store.deleteSound(id: sound.id) }
+                        store.deleteSound(id: sound.id)
                     } : nil
                 )
             }
@@ -77,13 +77,10 @@ struct SoundGridView: View {
                 guard case .success(let urls) = result, let url = urls.first else { return }
                 guard url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
-                Task {
-                    await store.uploadSound(
-                        fileURL: url,
-                        name: url.deletingPathExtension().lastPathComponent,
-                        description: nil
-                    )
-                }
+                store.uploadSound(
+                    fileURL: url,
+                    name: url.deletingPathExtension().lastPathComponent
+                )
             }
         }
     }

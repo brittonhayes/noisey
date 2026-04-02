@@ -150,7 +150,7 @@ async fn main() {
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(64);
 
     // Start audio engine on a dedicated thread and wait for actual mode
-    let sim_rx = spawn_audio_thread(args.sounds_dir.clone(), audio_rx, args.simulate);
+    let sim_rx = spawn_audio_thread(args.sounds_dir.clone(), audio_rx, audio_tx.clone(), args.simulate);
     let simulate = sim_rx.recv().unwrap_or(args.simulate);
     if simulate {
         info!("Startup: audio engine started (simulation mode)");
@@ -219,6 +219,7 @@ async fn main() {
         audio_tx,
         simulate,
         sounds_dir: args.sounds_dir.clone(),
+        current_device: None,
         #[cfg(feature = "wifi")]
         wifi_state: wifi_state.clone(),
     }));

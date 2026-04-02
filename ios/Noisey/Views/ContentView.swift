@@ -5,18 +5,6 @@ struct ContentView: View {
     @State private var showingSounds = false
 
     var body: some View {
-        Group {
-            if store.hasServer {
-                mainView
-                    .onAppear { store.connect() }
-            } else {
-                ServerSetupView()
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private var mainView: some View {
         ZStack {
             // Background
             Color(red: 0.067, green: 0.067, blue: 0.067)
@@ -48,29 +36,22 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
+        .preferredColorScheme(.dark)
     }
 
     private var statusBar: some View {
         HStack {
-            if !store.isConnected {
-                Label("Disconnected", systemImage: "wifi.slash")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if let timer = store.sleepTimer {
+            if let timer = store.sleepTimer {
                 let mins = timer.remainingSecs / 60
                 let secs = timer.remainingSecs % 60
                 Text("sleep \(mins)m \(secs)s")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                 Button("cancel") {
-                    Task { await store.setSleepTimer(minutes: 0) }
+                    store.setSleepTimer(minutes: 0)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            } else if store.isSimulating {
-                Text("SIM")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.orange)
             }
         }
         .frame(maxWidth: .infinity)

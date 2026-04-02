@@ -4,7 +4,6 @@ struct MoonVolumeView: View {
     @Environment(NoiseyStore.self) private var store
     @State private var dragOffset: CGFloat = 0
     @State private var showHint = false
-    @State private var debounceTask: Task<Void, Never>?
 
     private let moonSize: CGFloat = 180
 
@@ -133,14 +132,7 @@ struct MoonVolumeView: View {
                     let prev = Float(dragOffset / 300)
                     let newVolume = max(0, min(1, store.masterVolume + delta + prev))
                     dragOffset = value.translation.height
-                    store.masterVolume = newVolume
-
-                    debounceTask?.cancel()
-                    debounceTask = Task {
-                        try? await Task.sleep(for: .milliseconds(150))
-                        guard !Task.isCancelled else { return }
-                        await store.setVolume(newVolume)
-                    }
+                    store.setVolume(newVolume)
                 }
                 .onEnded { _ in
                     dragOffset = 0

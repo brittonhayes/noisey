@@ -1,6 +1,7 @@
 use crate::audio::{self, AUDIO_EXTENSIONS};
 use crate::state::{
-    AudioCommand, Schedule, SleepTimer, SoundCategory, SoundEntry, SoundMeta, StatusResponse,
+    AudioCommand, AudioDeviceInfo, Schedule, SleepTimer, SoundCategory, SoundEntry, SoundMeta,
+    StatusResponse,
 };
 use axum::extract::DefaultBodyLimit;
 use axum::{
@@ -11,7 +12,7 @@ use axum::{
     Json, Router,
 };
 use rust_embed::Embed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -44,7 +45,9 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/api/schedule", get(get_schedule))
         .route("/api/schedule", post(set_schedule))
         .route("/api/schedule", delete(delete_schedule))
-        .route("/api/status", get(get_status));
+        .route("/api/status", get(get_status))
+        .route("/api/devices", get(list_devices))
+        .route("/api/devices/select", post(select_device));
 
     #[cfg(feature = "eink")]
     let router = router.route("/api/display/preview", get(display_preview));
@@ -447,6 +450,46 @@ async fn set_sleep_timer(
         info!(minutes = body.minutes, "API sleep timer set");
     }
 
+    Json(state.status())
+}
+
+// ========================================
+// DEVICES
+// ========================================
+
+#[derive(Serialize)]
+struct DeviceListResponse {
+    devices: Vec<AudioDeviceInfo>,
+    current_device: Option<String>,
+}
+
+async fn list_devices(State(state): State<SharedState>) -> Json<DeviceListResponse> {
+    let devices = audio::list_output_devices();
+    let current_device = state.read().await.current_device.clone();
+    Json(DeviceListResponse {
+        devices,
+        current_device,
+    })
+}
+
+#[derive(Deserialize)]
+struct DeviceSelectRequest {
+    device_name: Option<String>,
+}
+
+async fn select_device(
+    State(state): State<SharedState>,
+    Json(body): Json<DeviceSelectRequest>,
+) -> Json<StatusResponse> {
+    let mut state = state.write().await;
+    state.current_device = body.device_name.clone();
+    let _ = state
+        .audio_tx
+        .send(AudioCommand::SelectDevice {
+            device_name: body.device_name,
+        })
+        .await;
+    info!(device = ?state.current_device, "API: output device selected");
     Json(state.status())
 }
 

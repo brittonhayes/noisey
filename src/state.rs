@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -47,7 +48,8 @@ pub struct AppState {
     pub schedule: Option<Schedule>,
     pub audio_tx: mpsc::Sender<AudioCommand>,
     pub simulate: bool,
-    pub sounds_dir: std::path::PathBuf,
+    pub sounds_dir: PathBuf,
+    pub current_device: Option<String>,
     #[cfg(feature = "wifi")]
     pub wifi_state: wifi::SharedWifiState,
 }
@@ -59,6 +61,13 @@ pub enum AudioCommand {
     SetMasterVolume(f32),
     StopAll,
     InvalidateCache { id: String },
+    SelectDevice { device_name: Option<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioDeviceInfo {
+    pub name: String,
+    pub is_default: bool,
 }
 
 /// Sidecar metadata for uploaded sound memories.
@@ -78,6 +87,7 @@ pub struct StatusResponse {
     pub sleep_timer: Option<TimerStatus>,
     pub schedule: Option<Schedule>,
     pub simulate: bool,
+    pub current_device: Option<String>,
     #[cfg(feature = "wifi")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wifi: Option<wifi::WifiState>,
@@ -105,6 +115,7 @@ impl AppState {
             sleep_timer,
             schedule: self.schedule.clone(),
             simulate: self.simulate,
+            current_device: self.current_device.clone(),
             #[cfg(feature = "wifi")]
             wifi: None, // WiFi state is populated by the wifi routes separately
         }

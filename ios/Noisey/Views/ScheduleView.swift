@@ -89,7 +89,7 @@ struct ScheduleView: View {
     private func saveSchedule() {
         guard enabled, !selectedSoundId.isEmpty else {
             if !enabled, store.schedule != nil {
-                Task { await store.deleteSchedule() }
+                store.deleteSchedule()
             }
             return
         }
@@ -99,7 +99,7 @@ struct ScheduleView: View {
             soundId: selectedSoundId,
             enabled: true
         )
-        Task { await store.setSchedule(schedule) }
+        store.setSchedule(schedule)
     }
 
     private func formatTime(_ date: Date) -> String {

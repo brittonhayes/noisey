@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 struct NowPlayingBar: View {
@@ -30,14 +31,16 @@ struct NowPlayingBar: View {
 
             Spacer()
 
+            // AirPlay route picker
+            RoutePickerView()
+                .frame(width: 44, height: 44)
+
             // Play/pause button
             Button {
-                Task {
-                    if let active = store.activeSound {
-                        await store.toggleSound(id: active.id)
-                    } else if let first = store.sounds.first {
-                        await store.toggleSound(id: first.id)
-                    }
+                if let active = store.activeSound {
+                    store.toggleSound(id: active.id)
+                } else if let first = store.sounds.first {
+                    store.toggleSound(id: first.id)
                 }
             } label: {
                 Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
@@ -52,4 +55,17 @@ struct NowPlayingBar: View {
         .padding(.horizontal, 24)
         .animation(.easeInOut(duration: 0.2), value: store.isPlaying)
     }
+}
+
+// MARK: - AVRoutePickerView Wrapper
+
+struct RoutePickerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.tintColor = .white
+        picker.activeTintColor = .systemBlue
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }

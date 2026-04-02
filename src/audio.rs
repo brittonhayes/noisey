@@ -1,5 +1,5 @@
 use crate::noise::{Biquad, CreekBrook, NightWind, OceanSurf, SoundSource, WarmRain, SAMPLE_RATE};
-use crate::state::AudioCommand;
+use crate::state::{AudioCommand, AudioDeviceInfo};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -134,11 +134,12 @@ fn warmth_to_cutoff(warmth: f32) -> f32 {
 pub fn spawn_audio_thread(
     sounds_dir: PathBuf,
     rx: mpsc::Receiver<AudioCommand>,
+    tx: mpsc::Sender<AudioCommand>,
     simulate: bool,
 ) -> std::sync::mpsc::Receiver<bool> {
     let (sim_tx, sim_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(e) = run_audio_engine(sounds_dir, rx, simulate, sim_tx) {
+        if let Err(e) = run_audio_engine(sounds_dir, rx, tx, simulate, sim_tx) {
             error!("Audio engine failed: {e}");
         }
     });
@@ -148,6 +149,7 @@ pub fn spawn_audio_thread(
 fn run_audio_engine(
     sounds_dir: PathBuf,
     mut rx: mpsc::Receiver<AudioCommand>,
+    watchdog_tx: mpsc::Sender<AudioCommand>,
     simulate: bool,
     sim_tx: std::sync::mpsc::Sender<bool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -159,14 +161,13 @@ fn run_audio_engine(
         warmth_filter_r: Biquad::low_pass(warmth_cutoff, 0.707),
     }));
 
-    let _device = if simulate {
+    let mut stream = if simulate {
         info!("Audio engine: running in simulation mode (no audio hardware)");
         let _ = sim_tx.send(true);
         None
     } else {
-        match try_open_device(Arc::clone(&mixer)) {
+        match open_device_by_name(None, Arc::clone(&mixer)) {
             Some(dev) => {
-                info!("Audio engine: playback device opened (cpal)");
                 let _ = sim_tx.send(false);
                 Some(dev)
             }
@@ -180,7 +181,7 @@ fn run_audio_engine(
         }
     };
 
-    if _device.is_none() {
+    if stream.is_none() {
         let mixer_for_sim = Arc::clone(&mixer);
         std::thread::spawn(move || {
             let frame_size = 1024usize;
@@ -199,17 +200,70 @@ fn run_audio_engine(
         });
     }
 
-    process_commands(&mixer, &sounds_dir, &mut rx);
+    // Spawn device watchdog: checks every 5 seconds if the selected device is still available
+    let selected_device: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let watchdog_selected = Arc::clone(&selected_device);
+    let watchdog_tx = watchdog_tx;
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let selected = watchdog_selected.lock().ok().and_then(|s| s.clone());
+            if let Some(ref name) = selected {
+                let devices = list_output_devices();
+                if !devices.iter().any(|d| &d.name == name) {
+                    warn!(device = %name, "Audio watchdog: selected device disappeared, falling back to default");
+                    let _ = watchdog_tx.blocking_send(AudioCommand::SelectDevice {
+                        device_name: None,
+                    });
+                }
+            }
+        }
+    });
+
+    process_commands(&mixer, &sounds_dir, &mut rx, &mut stream, &selected_device);
 
     info!("Audio engine: shutting down");
     Ok(())
 }
 
-fn try_open_device(mixer: Arc<Mutex<MixerState>>) -> Option<cpal::Stream> {
+/// List all available output devices on the system.
+/// On macOS, AirPlay speakers appear as CoreAudio output devices.
+pub fn list_output_devices() -> Vec<AudioDeviceInfo> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let default_name = host
+        .default_output_device()
+        .and_then(|d| d.name().ok());
+
+    let mut devices = Vec::new();
+    if let Ok(output_devices) = host.output_devices() {
+        for device in output_devices {
+            if let Ok(name) = device.name() {
+                let is_default = default_name.as_deref() == Some(&name);
+                devices.push(AudioDeviceInfo { name, is_default });
+            }
+        }
+    }
+    devices
+}
+
+fn open_device_by_name(
+    device_name: Option<&str>,
+    mixer: Arc<Mutex<MixerState>>,
+) -> Option<cpal::Stream> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
-    let device = host.default_output_device()?;
+    let device = match device_name {
+        None => host.default_output_device()?,
+        Some(name) => host
+            .output_devices()
+            .ok()?
+            .find(|d| d.name().ok().as_deref() == Some(name))?,
+    };
+
+    let dev_name = device.name().unwrap_or_default();
 
     let config = cpal::StreamConfig {
         channels: 2,
@@ -278,6 +332,7 @@ fn try_open_device(mixer: Arc<Mutex<MixerState>>) -> Option<cpal::Stream> {
         .ok()?;
 
     stream.play().ok()?;
+    info!(device = %dev_name, "Audio engine: opened output device");
     Some(stream)
 }
 
@@ -285,75 +340,112 @@ fn process_commands(
     mixer: &Arc<Mutex<MixerState>>,
     sounds_dir: &Path,
     rx: &mut mpsc::Receiver<AudioCommand>,
+    stream: &mut Option<cpal::Stream>,
+    selected_device: &Arc<Mutex<Option<String>>>,
 ) {
     let mut file_cache: HashMap<String, Arc<DecodedAudio>> = HashMap::new();
 
     while let Some(cmd) = rx.blocking_recv() {
-        let mut state = mixer.lock().unwrap();
         match cmd {
-            AudioCommand::Play { id } => {
-                state.sounds.remove(&id);
-
-                let source = match id.as_str() {
-                    "ocean-surf" => Some(ActiveSource::Procedural(Box::new(OceanSurf::new()))),
-                    "warm-rain" => Some(ActiveSource::Procedural(Box::new(WarmRain::new()))),
-                    "creek" => Some(ActiveSource::Procedural(Box::new(CreekBrook::new()))),
-                    "night-wind" => Some(ActiveSource::Procedural(Box::new(NightWind::new()))),
-                    _ => {
-                        let audio = file_cache.get(&id).cloned().or_else(|| {
-                            let decoded = load_sound_file(sounds_dir, &id)?;
-                            let arc = Arc::new(decoded);
-                            file_cache.insert(id.clone(), Arc::clone(&arc));
-                            Some(arc)
-                        });
-
-                        audio.map(|a| ActiveSource::File {
-                            audio: a,
-                            position: 0,
-                        })
+            AudioCommand::SelectDevice { device_name } => {
+                // Drop old stream before opening new one
+                *stream = None;
+                *stream = open_device_by_name(
+                    device_name.as_deref(),
+                    Arc::clone(mixer),
+                );
+                if let Ok(mut sel) = selected_device.lock() {
+                    *sel = device_name.clone();
+                }
+                match (&stream, &device_name) {
+                    (Some(_), Some(name)) => {
+                        info!(device = %name, "Audio engine: switched output device");
                     }
-                };
-
-                match source {
-                    Some(src) => {
-                        state.sounds.insert(
-                            id.clone(),
-                            ActiveSound {
-                                source: src,
-                                volume: SmoothedValue::new(1.0, SMOOTH_COEFF),
-                                fade: 0.0,
-                                fade_delta: 1.0 / FADE_IN_SAMPLES as f32,
-                                pending_remove: false,
-                            },
-                        );
-                        info!(sound = %id, "Audio engine: started playback (fade in)");
+                    (Some(_), None) => {
+                        info!("Audio engine: switched to default output device");
                     }
-                    None => {
-                        warn!(sound = %id, "Audio engine: sound not found");
+                    (None, _) => {
+                        warn!("Audio engine: failed to open selected device, no audio output");
                     }
                 }
             }
-            AudioCommand::Stop { id } => {
-                if let Some(active) = state.sounds.get_mut(&id) {
-                    active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
-                    active.pending_remove = true;
-                    info!(sound = %id, "Audio engine: fading out");
+            other => {
+                let mut state = mixer.lock().unwrap();
+                match other {
+                    AudioCommand::Play { id } => {
+                        state.sounds.remove(&id);
+
+                        let source = match id.as_str() {
+                            "ocean-surf" => {
+                                Some(ActiveSource::Procedural(Box::new(OceanSurf::new())))
+                            }
+                            "warm-rain" => {
+                                Some(ActiveSource::Procedural(Box::new(WarmRain::new())))
+                            }
+                            "creek" => {
+                                Some(ActiveSource::Procedural(Box::new(CreekBrook::new())))
+                            }
+                            "night-wind" => {
+                                Some(ActiveSource::Procedural(Box::new(NightWind::new())))
+                            }
+                            _ => {
+                                let audio = file_cache.get(&id).cloned().or_else(|| {
+                                    let decoded = load_sound_file(sounds_dir, &id)?;
+                                    let arc = Arc::new(decoded);
+                                    file_cache.insert(id.clone(), Arc::clone(&arc));
+                                    Some(arc)
+                                });
+
+                                audio.map(|a| ActiveSource::File {
+                                    audio: a,
+                                    position: 0,
+                                })
+                            }
+                        };
+
+                        match source {
+                            Some(src) => {
+                                state.sounds.insert(
+                                    id.clone(),
+                                    ActiveSound {
+                                        source: src,
+                                        volume: SmoothedValue::new(1.0, SMOOTH_COEFF),
+                                        fade: 0.0,
+                                        fade_delta: 1.0 / FADE_IN_SAMPLES as f32,
+                                        pending_remove: false,
+                                    },
+                                );
+                                info!(sound = %id, "Audio engine: started playback (fade in)");
+                            }
+                            None => {
+                                warn!(sound = %id, "Audio engine: sound not found");
+                            }
+                        }
+                    }
+                    AudioCommand::Stop { id } => {
+                        if let Some(active) = state.sounds.get_mut(&id) {
+                            active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
+                            active.pending_remove = true;
+                            info!(sound = %id, "Audio engine: fading out");
+                        }
+                    }
+                    AudioCommand::SetMasterVolume(vol) => {
+                        state.master_volume.set(vol);
+                    }
+                    AudioCommand::StopAll => {
+                        let count = state.sounds.len();
+                        for (_id, active) in state.sounds.iter_mut() {
+                            active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
+                            active.pending_remove = true;
+                        }
+                        info!(count = count, "Audio engine: fading out all sounds");
+                    }
+                    AudioCommand::InvalidateCache { id } => {
+                        file_cache.remove(&id);
+                        info!(sound = %id, "Audio engine: cache invalidated");
+                    }
+                    AudioCommand::SelectDevice { .. } => unreachable!(),
                 }
-            }
-            AudioCommand::SetMasterVolume(vol) => {
-                state.master_volume.set(vol);
-            }
-            AudioCommand::StopAll => {
-                let count = state.sounds.len();
-                for (_id, active) in state.sounds.iter_mut() {
-                    active.fade_delta = -1.0 / FADE_OUT_SAMPLES as f32;
-                    active.pending_remove = true;
-                }
-                info!(count = count, "Audio engine: fading out all sounds");
-            }
-            AudioCommand::InvalidateCache { id } => {
-                file_cache.remove(&id);
-                info!(sound = %id, "Audio engine: cache invalidated");
             }
         }
     }

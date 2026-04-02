@@ -30,10 +30,8 @@ struct SleepTimerView: View {
                             .font(.footnote.monospaced())
                             .foregroundStyle(.secondary)
                         Button {
-                            Task {
-                                selectedMinutes = nil
-                                await store.setSleepTimer(minutes: 0)
-                            }
+                            selectedMinutes = nil
+                            store.setSleepTimer(minutes: 0)
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.footnote)
@@ -46,10 +44,8 @@ struct SleepTimerView: View {
             HStack(spacing: 6) {
                 ForEach(presets, id: \.1) { label, minutes in
                     Button {
-                        Task {
-                            selectedMinutes = minutes
-                            await store.setSleepTimer(minutes: minutes)
-                        }
+                        selectedMinutes = minutes
+                        store.setSleepTimer(minutes: minutes)
                     } label: {
                         Text(label)
                             .font(.footnote.weight(.medium))
