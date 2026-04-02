@@ -29,27 +29,30 @@ final class ActiveSound: @unchecked Sendable {
     var fade: Float = 0
     var fadeDelta: Float
     var pendingRemove: Bool = false
+    var effects: EffectsChain
 
-    init(generator: ProceduralGenerator, fadeDelta: Float) {
+    init(generator: ProceduralGenerator, fadeDelta: Float, soundID: String) {
         self.generator = generator
         self.fileSamples = nil
         self.fileChannels = 0
         self.volume = SmoothedValue(initial: 1.0, coeff: smoothCoeff)
         self.fadeDelta = fadeDelta
+        self.effects = EffectsChain(preset: SoundPresets.preset(for: soundID))
     }
 
-    init(samples: [Float], channels: Int, fadeDelta: Float) {
+    init(samples: [Float], channels: Int, fadeDelta: Float, soundID: String) {
         self.generator = nil
         self.fileSamples = samples
         self.fileChannels = channels
         self.volume = SmoothedValue(initial: 1.0, coeff: smoothCoeff)
         self.fadeDelta = fadeDelta
+        self.effects = EffectsChain(preset: SoundPresets.preset(for: soundID))
     }
 
     func fillMono(_ buf: UnsafeMutablePointer<Float>, count: Int) {
         if let gen = generator {
             for i in 0..<count {
-                buf[i] = gen.nextSample()
+                buf[i] = effects.process(gen.nextSample())
             }
         } else if let samples = fileSamples, !samples.isEmpty {
             let ch = fileChannels
@@ -58,7 +61,8 @@ final class ActiveSound: @unchecked Sendable {
                 for c in 0..<ch {
                     mono += samples[(filePosition + c) % samples.count]
                 }
-                buf[i] = mono / Float(ch)
+                let raw = mono / Float(ch)
+                buf[i] = effects.process(raw)
                 filePosition = (filePosition + ch) % samples.count
             }
         } else {
@@ -75,6 +79,9 @@ final class MixerState: @unchecked Sendable {
     private var masterVolume = SmoothedValue(initial: 0.5, coeff: smoothCoeff)
     private var warmthFilterL: Biquad
     private var warmthFilterR: Biquad
+
+    /// Smoothed RMS level from the render callback (0…1). Written on audio thread, read on main.
+    private(set) var rmsLevel: Float = 0
 
     // Pre-allocated scratch buffers (avoid heap alloc in render callback)
     private var monoBuf = [Float](repeating: 0, count: maxFrameCount)
@@ -159,6 +166,16 @@ final class MixerState: @unchecked Sendable {
                 out[i] = warmthFilterL.process(out[i])
                 out[i] = max(-1.0, min(1.0, out[i]))
             }
+
+            // Compute RMS for metering (smoothed to avoid jitter)
+            var sumSq: Float = 0
+            for i in 0..<frameCount { sumSq += out[i] * out[i] }
+            let rms = sqrtf(sumSq / Float(max(1, frameCount)))
+            // Exponential smoothing: fast attack (~10ms), slow release (~150ms)
+            let attack: Float = 1.0 - expf(-1.0 / (0.010 * Float(sampleRate) / Float(max(1, frameCount))))
+            let release: Float = 1.0 - expf(-1.0 / (0.150 * Float(sampleRate) / Float(max(1, frameCount))))
+            let coeff = rms > rmsLevel ? attack : release
+            rmsLevel += coeff * (rms - rmsLevel)
         }
     }
 }
@@ -264,7 +281,8 @@ final class AudioEngine: @unchecked Sendable {
         guard let gen = ProceduralGenerator.create(id: id) else { return }
         let sound = ActiveSound(
             generator: gen,
-            fadeDelta: 1.0 / Float(fadeInSamples)
+            fadeDelta: 1.0 / Float(fadeInSamples),
+            soundID: id
         )
         mixer.play(id: id, sound: sound)
         start()
@@ -274,7 +292,8 @@ final class AudioEngine: @unchecked Sendable {
         let sound = ActiveSound(
             samples: samples,
             channels: channels,
-            fadeDelta: 1.0 / Float(fadeInSamples)
+            fadeDelta: 1.0 / Float(fadeInSamples),
+            soundID: id
         )
         mixer.play(id: id, sound: sound)
         start()
@@ -294,5 +313,10 @@ final class AudioEngine: @unchecked Sendable {
 
     func isPlaying(id: String) -> Bool {
         mixer.isPlaying(id: id)
+    }
+
+    /// Current smoothed RMS audio level (0…1). Safe to read from any thread.
+    var rmsLevel: Float {
+        mixer.rmsLevel
     }
 }

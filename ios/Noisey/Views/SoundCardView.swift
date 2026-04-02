@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SoundCardView: View {
+    @Environment(NoiseyStore.self) private var store
     let sound: SoundEntry
     let isActive: Bool
     let onTap: () -> Void
@@ -23,7 +24,7 @@ struct SoundCardView: View {
             .frame(maxWidth: .infinity)
             .glassEffect(
                 isActive
-                    ? .regular.interactive(true).tint(.white.opacity(0.3))
+                    ? .regular.interactive(true).tint(store.currentWorldConfig.accentColor.opacity(0.35))
                     : .regular.interactive(true)
             )
         }
@@ -43,6 +44,12 @@ struct SoundCardView: View {
         case "warm-rain": return "cloud.rain"
         case "creek": return "drop.triangle"
         case "night-wind": return "wind"
+        case "morning-birds": return "bird"
+        case "forest-canopy": return "tree"
+        case "meadow-breeze": return "leaf"
+        case "crickets": return "ant"
+        case "evening-frogs": return "lizard"
+        case "twilight-wind": return "wind"
         default: return sound.category == .custom ? "waveform" : "speaker.wave.2"
         }
     }

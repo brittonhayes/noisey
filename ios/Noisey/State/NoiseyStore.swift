@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 import SwiftUI
@@ -10,6 +11,12 @@ final class NoiseyStore {
     var sleepTimer: TimerStatus? = nil
     var schedule: Schedule? = nil
     var isDraggingVolume: Bool = false
+    var currentWorld: World = .night
+    /// Smoothed audio amplitude from the engine (0…1), updated at ~15 Hz for visuals.
+    var audioLevel: Float = 0
+
+    private var volumePollTask: Task<Void, Never>?
+    private var audioLevelTask: Task<Void, Never>?
 
     var activeSound: SoundEntry? {
         sounds.first { $0.active }
@@ -17,6 +24,15 @@ final class NoiseyStore {
 
     var isPlaying: Bool {
         activeSound != nil
+    }
+
+    var currentWorldConfig: WorldConfig {
+        WorldConfig.config(for: currentWorld)
+    }
+
+    var currentWorldSounds: [SoundEntry] {
+        let config = currentWorldConfig
+        return sounds.filter { config.soundIDs.contains($0.id) || $0.category == .custom }
     }
 
     let engine = AudioEngine()
@@ -30,6 +46,8 @@ final class NoiseyStore {
         loadSounds()
         loadSchedule()
         startScheduleWatcher()
+        observeDeviceVolume()
+        startAudioLevelPolling()
 
         nowPlayingManager.setup(
             onTogglePlayPause: { [weak self] in
@@ -45,21 +63,89 @@ final class NoiseyStore {
         )
     }
 
+    // MARK: - Device Volume
+
+    private func observeDeviceVolume() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(true)
+
+        // Seed from current device volume
+        masterVolume = session.outputVolume
+        engine.setMasterVolume(masterVolume)
+
+        // Poll device volume at ~10Hz — KVO on outputVolume is unreliable
+        volumePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self else { return }
+                // Skip polling while user is dragging to avoid fighting the gesture
+                guard !self.isDraggingVolume else { continue }
+                let vol = session.outputVolume
+                if abs(vol - self.masterVolume) > 0.001 {
+                    self.masterVolume = vol
+                    self.engine.setMasterVolume(vol)
+                }
+            }
+        }
+    }
+
+    // MARK: - Audio Level Metering
+
+    private func startAudioLevelPolling() {
+        audioLevelTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(66)) // ~15 Hz
+                guard let self else { return }
+                self.audioLevel = self.engine.rmsLevel
+            }
+        }
+    }
+
     // MARK: - Sound Catalog
 
     private func loadSounds() {
         // Built-in procedural sounds
         let builtIn: [SoundEntry] = [
+            // Night
             SoundEntry(id: "ocean-surf", name: "Ocean Surf", category: .nature, active: false),
             SoundEntry(id: "warm-rain", name: "Warm Rain", category: .nature, active: false),
             SoundEntry(id: "creek", name: "Creek", category: .nature, active: false),
             SoundEntry(id: "night-wind", name: "Night Wind", category: .nature, active: false),
+            // Day
+            SoundEntry(id: "morning-birds", name: "Morning Birds", category: .nature, active: false),
+            SoundEntry(id: "forest-canopy", name: "Forest Canopy", category: .nature, active: false),
+            SoundEntry(id: "meadow-breeze", name: "Meadow Breeze", category: .nature, active: false),
+            // Dusk
+            SoundEntry(id: "crickets", name: "Crickets", category: .nature, active: false),
+            SoundEntry(id: "evening-frogs", name: "Evening Frogs", category: .nature, active: false),
+            SoundEntry(id: "twilight-wind", name: "Twilight Wind", category: .nature, active: false),
         ]
 
         // Custom sounds from disk
         let custom = SoundFileManager.loadAllCustomSounds()
 
         sounds = builtIn + custom
+
+        // Restore persisted world
+        if let saved = UserDefaults.standard.string(forKey: "currentWorld"),
+           let world = World(rawValue: saved) {
+            currentWorld = world
+        }
+    }
+
+    // MARK: - World
+
+    func switchWorld(to world: World) {
+        let oldConfig = currentWorldConfig
+        currentWorld = world
+        UserDefaults.standard.set(world.rawValue, forKey: "currentWorld")
+
+        // If a sound from the old world is playing, crossfade to new world's default
+        if let active = activeSound, oldConfig.soundIDs.contains(active.id) {
+            let newConfig = currentWorldConfig
+            toggleSound(id: active.id)   // stop old
+            toggleSound(id: newConfig.defaultSoundID) // start new
+        }
     }
 
     // MARK: - Playback
@@ -120,6 +206,7 @@ final class NoiseyStore {
     func setVolume(_ volume: Float) {
         masterVolume = volume
         engine.setMasterVolume(volume)
+        DeviceVolumeController.shared.setVolume(volume)
     }
 
     // MARK: - Sound Management

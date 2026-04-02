@@ -1,9 +1,16 @@
-import AVKit
 import SwiftUI
 
 struct NowPlayingBar: View {
     @Environment(NoiseyStore.self) private var store
     @Binding var showingSounds: Bool
+
+    private var isLight: Bool {
+        store.currentWorld == .day
+    }
+
+    private var iconColor: Color {
+        isLight ? .black.opacity(0.65) : .white.opacity(0.85)
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -13,11 +20,11 @@ struct NowPlayingBar: View {
             } label: {
                 Image(systemName: "slider.vertical.3")
                     .font(.title3)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(iconColor)
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(true))
             }
             .buttonStyle(.plain)
+            .glassEffect(.regular)
 
             Spacer()
 
@@ -25,15 +32,11 @@ struct NowPlayingBar: View {
             if let sound = store.activeSound {
                 Text(sound.name)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isLight ? .black.opacity(0.5) : .secondary)
                     .transition(.opacity)
             }
 
             Spacer()
-
-            // AirPlay route picker
-            RoutePickerView()
-                .frame(width: 44, height: 44)
 
             // Play/pause button
             Button {
@@ -45,27 +48,14 @@ struct NowPlayingBar: View {
             } label: {
                 Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
-                    .foregroundStyle(store.isPlaying ? .black : .white.opacity(0.8))
+                    .foregroundStyle(store.isPlaying ? (isLight ? .white : .black) : iconColor)
                     .frame(width: 44, height: 44)
-                    .background(store.isPlaying ? .white : .clear, in: Circle())
-                    .glassEffect(store.isPlaying ? .regular.interactive(true).tint(.white) : .regular.interactive(true), in: Circle())
             }
             .buttonStyle(.plain)
+            .background(store.isPlaying ? (isLight ? .black : .white) : .clear, in: Circle())
+            .glassEffect(store.isPlaying ? .regular.tint(isLight ? .black : .white) : .regular, in: Circle())
         }
         .padding(.horizontal, 24)
         .animation(.easeInOut(duration: 0.2), value: store.isPlaying)
     }
-}
-
-// MARK: - AVRoutePickerView Wrapper
-
-struct RoutePickerView: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let picker = AVRoutePickerView()
-        picker.tintColor = .white
-        picker.activeTintColor = .systemBlue
-        return picker
-    }
-
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }

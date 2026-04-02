@@ -51,9 +51,13 @@ struct StarfieldView: View {
                     let r = star.size / 2
 
                     let rect = CGRect(x: x - r, y: y - r, width: star.size, height: star.size)
+                    // Larger stars get a subtle cool blue tint
+                    let starColor: Color = star.size >= 2
+                        ? Color(red: 0.85, green: 0.88, blue: 1.0)
+                        : Color(red: 0.92, green: 0.93, blue: 1.0)
                     context.fill(
                         Path(ellipseIn: rect),
-                        with: .color(.white.opacity(brightness))
+                        with: .color(starColor.opacity(brightness))
                     )
                 }
             }

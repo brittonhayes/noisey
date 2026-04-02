@@ -18,6 +18,17 @@ cargo test test_name                   # Single test by name
 
 The `--simulate` flag runs without audio hardware, useful for development and CI. Feature flags (`eink`, `wifi`) gate optional hardware integrations — check `Cargo.toml` for the full list. Cross-compilation to Raspberry Pi targets uses `cross` via the cross-compile script in the repo root.
 
+### iOS App
+
+The iOS companion app lives in `ios/`. Build and run using mise tasks from the `ios/` directory:
+
+```bash
+cd ios
+mise run sim      # Build, install, and launch in iOS Simulator
+mise run build    # Build only
+mise run clean    # Clean build artifacts
+```
+
 ## Design Principles
 
 **Single binary, zero config.** Static web assets are embedded into the binary at compile time. The app should start with sensible defaults and no mandatory configuration. Sound files are the only external runtime dependency.

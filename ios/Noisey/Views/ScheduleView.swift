@@ -8,11 +8,13 @@ struct ScheduleView: View {
     @State private var selectedSoundId = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("schedule")
-                    .font(.footnote.weight(.medium))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(1.2)
 
                 Spacer()
 
@@ -21,39 +23,55 @@ struct ScheduleView: View {
             }
 
             if enabled {
-                VStack(spacing: 14) {
+                VStack(spacing: 0) {
                     HStack {
                         Image(systemName: "moon.fill")
                             .font(.footnote)
-                            .foregroundStyle(.indigo)
+                            .foregroundStyle(Color(red: 0.55, green: 0.50, blue: 0.90))
                             .frame(width: 20)
-                        Text("Bedtime")
-                            .font(.footnote)
+                        Text("bedtime")
+                            .font(.subheadline)
                         Spacer()
                         DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
+                            .fixedSize()
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+
+                    Rectangle()
+                        .fill(.white.opacity(0.06))
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 14)
 
                     HStack {
                         Image(systemName: "sunrise.fill")
                             .font(.footnote)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color(red: 1.0, green: 0.70, blue: 0.38))
                             .frame(width: 20)
-                        Text("Wake Up")
-                            .font(.footnote)
+                        Text("wake up")
+                            .font(.subheadline)
                         Spacer()
                         DatePicker("", selection: $stopTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
+                            .fixedSize()
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
 
                     if !store.sounds.isEmpty {
+                        Rectangle()
+                            .fill(.white.opacity(0.06))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 14)
+
                         HStack {
                             Image(systemName: "speaker.wave.2.fill")
                                 .font(.footnote)
-                                .foregroundStyle(.teal)
+                                .foregroundStyle(Color(red: 0.40, green: 0.75, blue: 0.78))
                                 .frame(width: 20)
-                            Text("Sound")
-                                .font(.footnote)
+                            Text("sound")
+                                .font(.subheadline)
                             Spacer()
                             Picker("", selection: $selectedSoundId) {
                                 ForEach(store.sounds) { sound in
@@ -63,8 +81,11 @@ struct ScheduleView: View {
                             .pickerStyle(.menu)
                             .tint(.secondary)
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
                     }
                 }
+                .glassEffect(.regular)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: enabled)
