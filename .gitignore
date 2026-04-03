@@ -22,3 +22,16 @@ target
 
 # User sound files (add your own .wav/.ogg files here)
 sounds/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+DerivedData/
+build/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
