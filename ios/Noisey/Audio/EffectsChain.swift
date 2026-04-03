@@ -100,39 +100,13 @@ enum SoundPresets {
 
         // ── Night World ──────────────────────────────────────────────
 
-        case "ocean-surf":
-            // Vast, cavernous space — long reverb tail, subtle delay for depth
+        case "midnight-forest":
+            // Deep, enveloping darkness — very long reverb tail, subtle delay for
+            // owl echo, slow chorus for uneasy spatial width
             return EffectsPreset(
-                reverbRoomSize: 0.85, reverbDamping: 0.4, reverbWet: 0.35, reverbDry: 0.65,
-                delayTimeMs: 180, delayFeedback: 0.15, delayWet: 0.08, delayDry: 0.92,
-                chorusRateHz: 0, chorusDepthMs: 0, chorusWet: 0, chorusDry: 1,
-                outputGain: 1.0
-            )
-
-        case "warm-rain":
-            // Enclosed, cozy — moderate reverb like rain on a rooftop, gentle chorus for width
-            return EffectsPreset(
-                reverbRoomSize: 0.6, reverbDamping: 0.65, reverbWet: 0.25, reverbDry: 0.75,
-                delayTimeMs: 0, delayFeedback: 0, delayWet: 0, delayDry: 1,
-                chorusRateHz: 0.3, chorusDepthMs: 3.0, chorusWet: 0.15, chorusDry: 0.85,
-                outputGain: 1.0
-            )
-
-        case "creek":
-            // Open natural space — bright reverb, short delay for ripple echoes
-            return EffectsPreset(
-                reverbRoomSize: 0.55, reverbDamping: 0.3, reverbWet: 0.3, reverbDry: 0.7,
-                delayTimeMs: 90, delayFeedback: 0.2, delayWet: 0.12, delayDry: 0.88,
-                chorusRateHz: 0.4, chorusDepthMs: 2.0, chorusWet: 0.1, chorusDry: 0.9,
-                outputGain: 1.0
-            )
-
-        case "night-wind":
-            // Expansive, lonely — very long reverb, slow chorus for eerie movement
-            return EffectsPreset(
-                reverbRoomSize: 0.9, reverbDamping: 0.55, reverbWet: 0.4, reverbDry: 0.6,
-                delayTimeMs: 250, delayFeedback: 0.1, delayWet: 0.06, delayDry: 0.94,
-                chorusRateHz: 0.15, chorusDepthMs: 6.0, chorusWet: 0.2, chorusDry: 0.8,
+                reverbRoomSize: 0.92, reverbDamping: 0.5, reverbWet: 0.40, reverbDry: 0.60,
+                delayTimeMs: 220, delayFeedback: 0.12, delayWet: 0.08, delayDry: 0.92,
+                chorusRateHz: 0.12, chorusDepthMs: 5.0, chorusWet: 0.18, chorusDry: 0.82,
                 outputGain: 1.0
             )
 
@@ -147,34 +121,7 @@ enum SoundPresets {
                 outputGain: 0.85
             )
 
-        case "forest-canopy":
-            // Dense, immersive — medium reverb with damping, subtle chorus for leaf movement
-            return EffectsPreset(
-                reverbRoomSize: 0.65, reverbDamping: 0.5, reverbWet: 0.3, reverbDry: 0.7,
-                delayTimeMs: 0, delayFeedback: 0, delayWet: 0, delayDry: 1,
-                chorusRateHz: 0.25, chorusDepthMs: 4.0, chorusWet: 0.18, chorusDry: 0.82,
-                outputGain: 1.0
-            )
-
-        case "meadow-breeze":
-            // Wide open field — bright reverb, gentle chorus for shimmering air
-            return EffectsPreset(
-                reverbRoomSize: 0.7, reverbDamping: 0.2, reverbWet: 0.35, reverbDry: 0.65,
-                delayTimeMs: 0, delayFeedback: 0, delayWet: 0, delayDry: 1,
-                chorusRateHz: 0.2, chorusDepthMs: 5.0, chorusWet: 0.22, chorusDry: 0.78,
-                outputGain: 1.0
-            )
-
         // ── Dusk World ───────────────────────────────────────────────
-
-        case "crickets":
-            // Warm, spacious dusk — long reverb tail, gentle delay echoes, soft chorus shimmer
-            return EffectsPreset(
-                reverbRoomSize: 0.75, reverbDamping: 0.5, reverbWet: 0.4, reverbDry: 0.6,
-                delayTimeMs: 200, delayFeedback: 0.2, delayWet: 0.12, delayDry: 0.88,
-                chorusRateHz: 0.18, chorusDepthMs: 3.5, chorusWet: 0.12, chorusDry: 0.88,
-                outputGain: 0.85
-            )
 
         case "evening-frogs":
             // Very wet reverb — frogs sound distant, across a field
@@ -183,15 +130,6 @@ enum SoundPresets {
                 delayTimeMs: 250, delayFeedback: 0.2, delayWet: 0.15, delayDry: 0.85,
                 chorusRateHz: 0, chorusDepthMs: 0, chorusWet: 0, chorusDry: 1,
                 outputGain: 0.8
-            )
-
-        case "twilight-wind":
-            // Deep, atmospheric dusk — long reverb, no chorus, natural volume shift only
-            return EffectsPreset(
-                reverbRoomSize: 0.85, reverbDamping: 0.45, reverbWet: 0.38, reverbDry: 0.62,
-                delayTimeMs: 300, delayFeedback: 0.08, delayWet: 0.05, delayDry: 0.95,
-                chorusRateHz: 0, chorusDepthMs: 0, chorusWet: 0, chorusDry: 1,
-                outputGain: 1.0
             )
 
         default:

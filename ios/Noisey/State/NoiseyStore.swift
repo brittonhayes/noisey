@@ -10,10 +10,14 @@ final class NoiseyStore {
     var masterVolume: Float = 0.5
     var sleepTimer: TimerStatus? = nil
     var schedule: Schedule? = nil
-    var isDraggingVolume: Bool = false
     var currentWorld: World = .night
     /// Smoothed audio amplitude from the engine (0…1), updated at ~15 Hz for visuals.
     var audioLevel: Float = 0
+
+    /// Layer balance controls (0…1). Each independently scales its audio layer.
+    var natureBalance: Float = 1.0
+    var toneBalance: Float = 1.0
+    var chatterBalance: Float = 1.0
 
     private var volumePollTask: Task<Void, Never>?
     private var audioLevelTask: Task<Void, Never>?
@@ -78,8 +82,6 @@ final class NoiseyStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self else { return }
-                // Skip polling while user is dragging to avoid fighting the gesture
-                guard !self.isDraggingVolume else { continue }
                 let vol = session.outputVolume
                 if abs(vol - self.masterVolume) > 0.001 {
                     self.masterVolume = vol
@@ -96,7 +98,10 @@ final class NoiseyStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(66)) // ~15 Hz
                 guard let self else { return }
-                self.audioLevel = self.engine.rmsLevel
+                let level = self.engine.rmsLevel
+                if abs(level - self.audioLevel) > 0.001 {
+                    self.audioLevel = level
+                }
             }
         }
     }
@@ -107,18 +112,11 @@ final class NoiseyStore {
         // Built-in procedural sounds
         let builtIn: [SoundEntry] = [
             // Night
-            SoundEntry(id: "ocean-surf", name: "Ocean Surf", category: .nature, active: false),
-            SoundEntry(id: "warm-rain", name: "Warm Rain", category: .nature, active: false),
-            SoundEntry(id: "creek", name: "Creek", category: .nature, active: false),
-            SoundEntry(id: "night-wind", name: "Night Wind", category: .nature, active: false),
+            SoundEntry(id: "midnight-forest", name: "Midnight Forest", category: .nature, active: false),
             // Day
             SoundEntry(id: "morning-birds", name: "Morning Birds", category: .nature, active: false),
-            SoundEntry(id: "forest-canopy", name: "Forest Canopy", category: .nature, active: false),
-            SoundEntry(id: "meadow-breeze", name: "Meadow Breeze", category: .nature, active: false),
             // Dusk
-            SoundEntry(id: "crickets", name: "Crickets", category: .nature, active: false),
             SoundEntry(id: "evening-frogs", name: "Evening Frogs", category: .nature, active: false),
-            SoundEntry(id: "twilight-wind", name: "Twilight Wind", category: .nature, active: false),
         ]
 
         // Custom sounds from disk
@@ -131,21 +129,33 @@ final class NoiseyStore {
            let world = World(rawValue: saved) {
             currentWorld = world
         }
+
+        // Restore persisted layer balances
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "natureBalance") != nil {
+            natureBalance = defaults.float(forKey: "natureBalance")
+        }
+        if defaults.object(forKey: "toneBalance") != nil {
+            toneBalance = defaults.float(forKey: "toneBalance")
+        }
+        if defaults.object(forKey: "chatterBalance") != nil {
+            chatterBalance = defaults.float(forKey: "chatterBalance")
+        }
+        engine.setLayerBalances(nature: natureBalance, tone: toneBalance, chatter: chatterBalance)
     }
 
     // MARK: - World
 
     func switchWorld(to world: World) {
-        let oldConfig = currentWorldConfig
         currentWorld = world
         UserDefaults.standard.set(world.rawValue, forKey: "currentWorld")
 
-        // If a sound from the old world is playing, crossfade to new world's default
-        if let active = activeSound, oldConfig.soundIDs.contains(active.id) {
-            let newConfig = currentWorldConfig
+        // Stop whatever is playing, then fade in the new world's default sound
+        if let active = activeSound {
             toggleSound(id: active.id)   // stop old
-            toggleSound(id: newConfig.defaultSoundID) // start new
         }
+        let newConfig = currentWorldConfig
+        toggleSound(id: newConfig.defaultSoundID)
     }
 
     // MARK: - Playback
@@ -207,6 +217,22 @@ final class NoiseyStore {
         masterVolume = volume
         engine.setMasterVolume(volume)
         DeviceVolumeController.shared.setVolume(volume)
+    }
+
+    enum LayerBalance: String {
+        case nature = "natureBalance"
+        case tone = "toneBalance"
+        case chatter = "chatterBalance"
+    }
+
+    func setBalance(_ layer: LayerBalance, to value: Float) {
+        switch layer {
+        case .nature:  natureBalance = value
+        case .tone:    toneBalance = value
+        case .chatter: chatterBalance = value
+        }
+        UserDefaults.standard.set(value, forKey: layer.rawValue)
+        engine.setLayerBalances(nature: natureBalance, tone: toneBalance, chatter: chatterBalance)
     }
 
     // MARK: - Sound Management

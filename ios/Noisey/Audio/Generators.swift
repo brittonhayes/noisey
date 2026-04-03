@@ -1,802 +1,628 @@
 import Foundation
 
-// MARK: - Ocean Surf
+// MARK: - Shared: Chord Drone
 
-/// Gentle ocean: brown noise shaped by two overlapping smooth envelopes
-/// at different periods, with a soft low-pass for warmth.
-struct OceanSurf {
-    private var noise = BrownNoise()
-    private var lp = OnePoleLP(cutoffHz: 900.0)
-    private var phase: (Double, Double) = (0, 0)
-    private let phaseInc: (Double, Double)
-
-    init() {
-        let sr = Double(sampleRate)
-        phaseInc = (
-            Double.pi * 2.0 / (10.0 * sr),
-            Double.pi * 2.0 / (14.0 * sr)
-        )
-    }
-
-    mutating func nextSample() -> Float {
-        let raw = noise.nextSample()
-        let filtered = lp.process(raw)
-
-        let envA = (1.0 - cos(phase.0)) * 0.5
-        let envB = (1.0 - cos(phase.1)) * 0.5
-        let envelope = Float(max(envA, envB))
-
-        phase.0 += phaseInc.0
-        if phase.0 > Double.pi * 2.0 { phase.0 -= Double.pi * 2.0 }
-        phase.1 += phaseInc.1
-        if phase.1 > Double.pi * 2.0 { phase.1 -= Double.pi * 2.0 }
-
-        return max(-1.0, min(1.0, filtered * envelope * 0.10))
-    }
-}
-
-// MARK: - Warm Rain
-
-/// Natural rain: pink noise with a wide LP for full-spectrum fidelity,
-/// plus a gentle high-frequency texture layer for droplet detail.
-struct WarmRain {
-    private var washNoise = PinkNoise()
-    private var washLP = OnePoleLP(cutoffHz: 3500.0)
-    private var detailNoise = WhiteNoise()
-    private var detailLP = OnePoleLP(cutoffHz: 6000.0)
-
-    mutating func nextSample() -> Float {
-        let washRaw = washNoise.nextSample()
-        let wash = washLP.process(washRaw)
-
-        let detailRaw = detailNoise.nextSample()
-        let detail = detailLP.process(detailRaw)
-
-        let mix = wash * 0.7 + detail * 0.08
-        return max(-1.0, min(1.0, mix * 0.08))
-    }
-}
-
-// MARK: - Creek Brook
-
-/// Gentle stream: layered filtered noise bands with slow random amplitude
-/// modulation. A low brown noise bed provides body while bandpass-filtered
-/// pink noise layers with wandering amplitude create the bubbling texture.
-struct CreekBrook {
-    private var bedNoise = BrownNoise()
-    private var bedLP = OnePoleLP(cutoffHz: 400.0)
-
-    private var midNoise = PinkNoise()
-    private var midBP = Biquad.bandPass(freq: 800.0, q: 0.8)
-    private var midAmp = SmoothedRandom(minRateHz: 0.3, maxRateHz: 0.8, rangeMin: 0.15, rangeMax: 0.5)
-
-    private var highNoise = WhiteNoise()
-    private var highBP = Biquad.bandPass(freq: 2200.0, q: 1.0)
-    private var highAmp = SmoothedRandom(minRateHz: 0.5, maxRateHz: 1.5, rangeMin: 0.05, rangeMax: 0.3)
-
-    private var shimmerNoise = WhiteNoise()
-    private var shimmerBP = Biquad.bandPass(freq: 4000.0, q: 1.2)
-    private var shimmerAmp = SmoothedRandom(minRateHz: 0.8, maxRateHz: 2.0, rangeMin: 0.0, rangeMax: 0.15)
-
-    private var sampleCounter: UInt32 = 0
-
-    mutating func nextSample() -> Float {
-        sampleCounter &+= 1
-
-        let midVol: Float
-        let highVol: Float
-        let shimmerVol: Float
-
-        if sampleCounter % 64 == 0 {
-            midVol = midAmp.nextValue()
-            highVol = highAmp.nextValue()
-            shimmerVol = shimmerAmp.nextValue()
-        } else {
-            midVol = midAmp.value
-            highVol = highAmp.value
-            shimmerVol = shimmerAmp.value
-        }
-
-        let bedRaw = bedNoise.nextSample()
-        let bed = bedLP.process(bedRaw) * 0.25
-
-        let midRaw = midNoise.nextSample()
-        let mid = midBP.process(midRaw) * midVol
-
-        let highRaw = highNoise.nextSample()
-        let high = highBP.process(highRaw) * highVol
-
-        let shimmerRaw = shimmerNoise.nextSample()
-        let shimmer = shimmerBP.process(shimmerRaw) * shimmerVol
-
-        let mix = bed + mid + high + shimmer
-        return max(-1.0, min(1.0, mix * 0.10))
-    }
-}
-
-// MARK: - Night Wind
-
-/// White noise through a resonant biquad LP with cutoff modulated by a slow
-/// random walk. Amplitude modulated by a separate slow LFO. Gentle breeze.
-struct NightWind {
-    private var noise = WhiteNoise()
-    private var filter = Biquad.lowPass(freq: 600.0, q: 0.7)
-    private var cutoffLFO = SmoothedRandom(minRateHz: 0.05, maxRateHz: 0.2, rangeMin: 200.0, rangeMax: 1200.0)
-    private var ampLFO = SmoothedRandom(minRateHz: 0.03, maxRateHz: 0.08, rangeMin: 0.3, rangeMax: 0.9)
-    private var sampleCounter: UInt32 = 0
-
-    mutating func nextSample() -> Float {
-        sampleCounter &+= 1
-
-        if sampleCounter % 64 == 0 {
-            let cutoff = cutoffLFO.nextValue()
-            let q: Float = 0.5 + (cutoff - 200.0) / 2000.0
-            filter.setLowPass(freq: cutoff, q: q)
-        }
-
-        let amp: Float = sampleCounter % 64 == 0 ? ampLFO.nextValue() : ampLFO.value
-
-        let raw = noise.nextSample()
-        let filtered = filter.process(raw)
-        return max(-1.0, min(1.0, filtered * amp * 0.8 * 0.10))
-    }
-}
-
-// MARK: - Morning Birds
-
-/// Warm sine tones tuned to Gmaj9 chord over a soft pink noise forest-air bed.
-/// Zelda-inspired: wide register, long decay tails, gentle vibrato, spacious and nostalgic.
-struct MorningBirds {
-    private var airNoise = PinkNoise()
-    private var airLP = OnePoleLP(cutoffHz: 1200.0)
-    private var voices: [BirdVoice]
-    private var sampleCounter: UInt32 = 0
-
-    struct BirdVoice {
-        var rng: FastRNG
+/// A slow chord drone: anchored root tones with a drifting color tone,
+/// dual low-pass filtering, and volume breathing via sine LFO.
+/// Used by MidnightForest, MorningBirds, and EveningFrogs.
+struct ChordDrone {
+    struct Tone {
         var phase: Float = 0
-        var freq: Float
-        var chirpLength: UInt32     // samples per chirp
-        var silenceLength: UInt32   // samples between chirps
-        var counter: UInt32 = 0
-        var isChirping: Bool = false
-        var amplitude: Float
-        var vibrato: Vibrato
-        let detuneMul: Float        // per-voice detuning (±3-5 cents)
-
-        init(baseFreq: Float, seed: UInt64) {
-            rng = FastRNG(seed: seed)
-            freq = baseFreq
-            chirpLength = UInt32(Float(sampleRate) * 0.35)
-            silenceLength = UInt32(rng.nextFloat(in: Float(sampleRate) * 2.5...Float(sampleRate) * 7.0))
-            amplitude = rng.nextFloat(in: 0.012...0.03)
-            vibrato = Vibrato(rateHz: rng.nextFloat(in: 0.8...1.8),
-                              depthCents: rng.nextFloat(in: 6...14),
-                              rng: &rng)
-            let cents = rng.nextFloat(in: -5...5)
-            detuneMul = powf(2.0, cents / 1200.0)
-        }
-
-        mutating func nextSample() -> Float {
-            counter += 1
-            if isChirping {
-                if counter >= chirpLength {
-                    counter = 0
-                    isChirping = false
-                    silenceLength = UInt32(rng.nextFloat(in: Float(sampleRate) * 3.0...Float(sampleRate) * 8.0))
-                    // Pick next chirp pitch from Gmaj9 chord tones
-                    freq = Tonality.dayChord.randomTone(in: 250...1800, rng: &rng)
-                    return 0
-                }
-                let t = Float(counter) / Float(chirpLength)
-                // Fast attack (~10%), long exponential decay — Zelda fairy-chime envelope
-                let env: Float
-                if t < 0.1 {
-                    env = t / 0.1  // quick linear attack
-                } else {
-                    let decayT = (t - 0.1) / 0.9
-                    env = expf(-1.6 * decayT)  // very long nostalgic decay
-                }
-                let vibMul = vibrato.nextMultiplier()
-                phase += (freq * detuneMul * vibMul) / Float(sampleRate)
-                if phase > 1.0 { phase -= 1.0 }
-                return sin(phase * Float.pi * 2.0) * env * amplitude
-            } else {
-                if counter >= silenceLength {
-                    counter = 0
-                    isChirping = true
-                    chirpLength = UInt32(rng.nextFloat(in: Float(sampleRate) * 0.3...Float(sampleRate) * 0.7))
-                }
-                return 0
-            }
-        }
-    }
-
-    init() {
-        let seeds: [UInt64] = [111, 222, 333, 444, 555, 666, 777]
-        // Gmaj9 chord tones spanning G3–D6 for wide, nostalgic voicing
-        let freqs: [Float] = [
-            196.0,   // G3  — low warmth
-            220.0,   // A3  — the 9th, dreamy tension
-            392.0,   // G4
-            493.9,   // B4
-            587.3,   // D5
-            740.0,   // F#5
-            880.0,   // A5  — high 9th sparkle
-        ]
-        voices = zip(freqs, seeds).map { BirdVoice(baseFreq: $0.0, seed: $0.1) }
-    }
-
-    mutating func nextSample() -> Float {
-        let airRaw = airNoise.nextSample()
-        let air = airLP.process(airRaw) * 0.12
-
-        var chirps: Float = 0
-        for i in voices.indices {
-            chirps += voices[i].nextSample()
-        }
-
-        return max(-1.0, min(1.0, (air + chirps) * 0.35))
-    }
-}
-
-// MARK: - Forest Canopy
-
-/// Pink noise through a wide bandpass for body, with slow amplitude gusts
-/// and a secondary high-frequency leaf-detail layer.
-struct ForestCanopy {
-    private var bodyNoise = PinkNoise()
-    private var bodyBP = Biquad.bandPass(freq: 800.0, q: 0.5)
-    private var gustAmp = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.1, rangeMin: 0.3, rangeMax: 0.7)
-
-    private var leafNoise = WhiteNoise()
-    private var leafBP = Biquad.bandPass(freq: 3000.0, q: 0.8)
-    private var leafAmp = SmoothedRandom(minRateHz: 0.1, maxRateHz: 0.4, rangeMin: 0.02, rangeMax: 0.12)
-
-    private var sampleCounter: UInt32 = 0
-
-    mutating func nextSample() -> Float {
-        sampleCounter &+= 1
-
-        let gust: Float
-        let leaf: Float
-        if sampleCounter % 64 == 0 {
-            gust = gustAmp.nextValue()
-            leaf = leafAmp.nextValue()
-        } else {
-            gust = gustAmp.value
-            leaf = leafAmp.value
-        }
-
-        let bodyRaw = bodyNoise.nextSample()
-        let body = bodyBP.process(bodyRaw) * gust
-
-        let leafRaw = leafNoise.nextSample()
-        let leafFiltered = leafBP.process(leafRaw) * leaf
-
-        return max(-1.0, min(1.0, (body + leafFiltered) * 0.10))
-    }
-}
-
-// MARK: - Meadow Breeze
-
-/// Band-limited white noise (200Hz HP + 2000Hz LP) with very slow amplitude
-/// modulation. Clean and airy.
-struct MeadowBreeze {
-    private var noise = WhiteNoise()
-    private var hpLP = OnePoleLP(cutoffHz: 200.0)  // used to subtract for HP effect
-    private var outputLP = OnePoleLP(cutoffHz: 2000.0)  // final band limiting
-    private var ampLFO = SmoothedRandom(minRateHz: 0.01, maxRateHz: 0.05, rangeMin: 0.3, rangeMax: 0.7)
-    private var sampleCounter: UInt32 = 0
-
-    mutating func nextSample() -> Float {
-        sampleCounter &+= 1
-
-        let amp: Float = sampleCounter % 64 == 0 ? ampLFO.nextValue() : ampLFO.value
-
-        let raw = noise.nextSample()
-        // High-pass: subtract low frequencies
-        let lowPart = hpLP.process(raw)
-        let highPassed = raw - lowPart
-        // Low-pass for band limiting
-        let bandLimited = outputLP.process(highPassed)
-
-        return max(-1.0, min(1.0, bandLimited * amp * 0.6 * 0.15))
-    }
-}
-
-// MARK: - Crickets
-
-/// Warm tonal pulses tuned to Bbm7 chord with gentle vibrato and long decay.
-/// Zelda-inspired: soft, unhurried, spacious.
-struct Crickets {
-    private var bedNoise = PinkNoise()
-    private var bedLP = OnePoleLP(cutoffHz: 1000.0)
-    private var voices: [CricketVoice]
-
-    struct CricketVoice {
-        var rng: FastRNG
-        var phase: Float = 0
-        var freq: Float
-        var chirpOnSamples: UInt32
-        var chirpOffSamples: UInt32
-        var counter: UInt32 = 0
-        var isOn: Bool = false
-        let amplitude: Float
-        var vibrato: Vibrato
-        let detuneMul: Float
-
-        init(freq: Float, onMs: Float, offMs: Float, amp: Float, seed: UInt64) {
-            rng = FastRNG(seed: seed)
-            self.freq = freq
-            self.amplitude = amp
-            chirpOnSamples = UInt32(onMs * Float(sampleRate) / 1000.0)
-            chirpOffSamples = UInt32(offMs * Float(sampleRate) / 1000.0)
-            vibrato = Vibrato(rateHz: rng.nextFloat(in: 0.6...1.4),
-                              depthCents: rng.nextFloat(in: 4...10),
-                              rng: &rng)
-            let cents = rng.nextFloat(in: -4...4)
-            detuneMul = powf(2.0, cents / 1200.0)
-        }
-
-        mutating func nextSample() -> Float {
-            counter += 1
-            if isOn {
-                if counter >= chirpOnSamples {
-                    counter = 0
-                    isOn = false
-                    chirpOffSamples = UInt32(rng.nextFloat(in: 2000...5000) * Float(sampleRate) / 1000.0)
-                    // Pick next pitch from Bbm7 chord tones
-                    freq = Tonality.duskChord.randomTone(in: 800...2000, rng: &rng)
-                    return 0
-                }
-                let vibMul = vibrato.nextMultiplier()
-                phase += (freq * detuneMul * vibMul) / Float(sampleRate)
-                if phase > 1.0 { phase -= 1.0 }
-                let t = Float(counter) / Float(chirpOnSamples)
-                // Fast attack, long exponential decay
-                let env: Float
-                if t < 0.08 {
-                    env = t / 0.08
-                } else {
-                    let decayT = (t - 0.08) / 0.92
-                    env = expf(-3.0 * decayT)
-                }
-                return sin(phase * Float.pi * 2.0) * env * amplitude
-            } else {
-                if counter >= chirpOffSamples {
-                    counter = 0
-                    isOn = true
-                    chirpOnSamples = UInt32(rng.nextFloat(in: 180...400) * Float(sampleRate) / 1000.0)
-                }
-                return 0
-            }
-        }
-    }
-
-    init() {
-        // Bbm7 chord tones: Bb5, Db6, F6, Ab6
-        voices = [
-            CricketVoice(freq: 932.3, onMs: 250, offMs: 3000, amp: 0.025, seed: 501),   // Bb5
-            CricketVoice(freq: 1108.7, onMs: 300, offMs: 3500, amp: 0.02, seed: 502),   // Db6
-            CricketVoice(freq: 1396.9, onMs: 200, offMs: 4000, amp: 0.018, seed: 503),  // F6
-            CricketVoice(freq: 1661.2, onMs: 220, offMs: 3200, amp: 0.02, seed: 504),   // Ab6
-        ]
-    }
-
-    mutating func nextSample() -> Float {
-        let bedRaw = bedNoise.nextSample()
-        let bed = bedLP.process(bedRaw) * 0.04
-
-        var chirps: Float = 0
-        for i in voices.indices {
-            chirps += voices[i].nextSample()
-        }
-
-        return max(-1.0, min(1.0, bed + chirps))
-    }
-}
-
-// MARK: - Evening Frogs
-
-/// Gentle warm tones tuned to open Bb major pentatonic voicings with slow vibrato
-/// and long decay. Calm and zen — no minor intervals, just roots, 5ths, and 9ths.
-/// A barely-there sine drone adds harmonic warmth underneath.
-///
-/// Frog calls are quantized to a 60 BPM beat grid. Each beat, each voice
-/// randomly decides whether to croak — creating emergent rhythmic patterns
-/// that lock to the pulse but never repeat.
-struct EveningFrogs {
-    private var windNoise = PinkNoise()
-    private var windLPlow = OnePoleLP(cutoffHz: 300.0)   // subtract for HP effect
-    private var windLPhigh = OnePoleLP(cutoffHz: 1200.0)  // cap the top end
-    private var windAmp = SmoothedRandom(minRateHz: 0.03, maxRateHz: 0.08, rangeMin: 0.02, rangeMax: 0.06)
-    private var windCounter: UInt32 = 0
-    private var voices: [FrogVoice]
-    private var drone: ChordDrone
-    /// Samples per 16th note at 60 BPM (smallest grid unit)
-    private let sixteenthSamples: UInt32 = UInt32(sampleRate) / 4 // 11025 samples
-    private var beatClock: UInt32 = 0
-    /// Per-kind momentum: when a frog of one kind croaks, it boosts
-    /// momentum for the *other* kinds — call and response between species.
-    private var momentum: [FrogKind: Float] = [.bullfrog: 0, .treefrog: 0, .peeper: 0]
-
-    /// Soft pad with open pentatonic voicings — roots, 5ths, and 9ths only.
-    /// No minor intervals. Glides gently every ~16 seconds.
-    struct ChordDrone {
-        /// Bb and F anchored — top voice floats between bright, open tones.
-        /// Every voicing is consonant and resolved.
-        static let chords: [[Float]] = [
-            [116.5, 174.6, 233.1],  // Bb  F  Bb  — pure octave/5th, home
-            [116.5, 174.6, 261.6],  // Bb  F  C   — add9, open and calm
-            [116.5, 174.6, 293.7],  // Bb  F  D   — major 3rd up top, bright
-            [116.5, 174.6, 233.1],  // Bb  F  Bb  — settle back home
-        ]
-
-        struct Tone {
-            var phase: Float = 0
-            var currentFreq: Float
-            var targetFreq: Float
-            let amp: Float
-            let glideCoeff: Float
-
-            init(freq: Float, amp: Float) {
-                currentFreq = freq
-                targetFreq = freq
-                self.amp = amp
-                glideCoeff = 1.0 - 1.0 / (0.3 * Float(sampleRate))
-            }
-
-            mutating func setTarget(_ freq: Float) {
-                targetFreq = freq
-            }
-
-            mutating func nextSample() -> Float {
-                currentFreq = currentFreq * glideCoeff + targetFreq * (1.0 - glideCoeff)
-
-                phase += currentFreq / Float(sampleRate)
-                if phase > 1.0 { phase -= 1.0 }
-                let p = phase * Float.pi * 2.0
-                let osc = sin(p) + sin(p * 2.0) * 0.5 + sin(p * 3.0) * 0.33
-                return osc * amp
-            }
-        }
-
-        var tones: [Tone]
-        var lpA: OnePoleLP
-        var lpB: OnePoleLP
-        var chordIndex: Int = 0
-        var sampleCounter: UInt32 = 0
-        let changeSamples: UInt32
-        var volPhase: Double = 0
-        let volPhaseInc: Double  // slow sine LFO for volume breathing
-
-        init() {
-            tones = [
-                Tone(freq: 116.5, amp: 0.018),  // bass
-                Tone(freq: 174.6, amp: 0.014),  // mid
-                Tone(freq: 233.1, amp: 0.010),  // high
-            ]
-            lpA = OnePoleLP(cutoffHz: 400.0)
-            lpB = OnePoleLP(cutoffHz: 400.0)
-            changeSamples = UInt32(16.0 * Float(sampleRate))
-            // ~25 second full cycle — very slow breathing
-            volPhaseInc = Double.pi * 2.0 / (25.0 * Double(sampleRate))
-        }
-
-        mutating func nextSample() -> Float {
-            sampleCounter &+= 1
-            if sampleCounter >= changeSamples {
-                sampleCounter = 0
-                chordIndex = (chordIndex + 1) % ChordDrone.chords.count
-                let chord = ChordDrone.chords[chordIndex]
-                for i in tones.indices {
-                    tones[i].setTarget(chord[i])
-                }
-            }
-
-            // Volume breathes between 0.5 and 1.0
-            volPhase += volPhaseInc
-            if volPhase > Double.pi * 2.0 { volPhase -= Double.pi * 2.0 }
-            let vol = Float(0.75 + 0.25 * cos(volPhase))
-
-            var sum: Float = 0
-            for i in tones.indices {
-                sum += tones[i].nextSample()
-            }
-            return lpB.process(lpA.process(sum)) * vol
-        }
-    }
-
-    /// Three species of frog, each with distinct character.
-    enum FrogKind: Hashable {
-        /// Low, slow, resonant — the big one in the pond
-        case bullfrog
-        /// Mid-range, moderate pace — the most common voice
-        case treefrog
-        /// High, quick, bright — tiny and distant
-        case peeper
-    }
-
-    struct FrogVoice {
-        var rng: FastRNG
-        var phase: Float = 0
-        let baseFreq: Float
         var currentFreq: Float
-        var burstLength: UInt32
-        var counter: UInt32 = 0
-        var isCalling: Bool = false
-        var bp: Biquad
-        var distanceLP: OnePoleLP
-        let maxAmplitude: Float
-        /// Per-croak dynamic gain — randomized each time the frog fires
-        var croakGain: Float = 1.0
-        var vibrato: Vibrato
-        let detuneMul: Float
-        let density: Float
-        let kind: FrogKind
-        /// Range for per-croak gain randomization (simulates distance/energy)
-        let gainRange: ClosedRange<Float>
-        /// Frequency range this species picks from
-        let freqRange: ClosedRange<Float>
-        /// Burst length range in seconds
-        let burstRange: ClosedRange<Float>
+        var targetFreq: Float
+        let amp: Float
+        let glideCoeff: Float
+        let h2: Float
+        let h3: Float
 
-        init(freq: Float, amp: Float, density: Float, kind: FrogKind,
-             gainRange: ClosedRange<Float>, freqRange: ClosedRange<Float>,
-             burstRange: ClosedRange<Float>, lpCutoff: Float, seed: UInt64) {
-            rng = FastRNG(seed: seed)
-            baseFreq = freq
+        init(freq: Float, amp: Float, h2: Float, h3: Float) {
             currentFreq = freq
-            maxAmplitude = amp
-            self.density = density
-            self.kind = kind
-            self.gainRange = gainRange
-            self.freqRange = freqRange
-            self.burstRange = burstRange
-            burstLength = UInt32(Float(sampleRate) * 0.35)
-            bp = Biquad.bandPass(freq: freq, q: 1.2)
-            distanceLP = OnePoleLP(cutoffHz: lpCutoff)
-            vibrato = Vibrato(rateHz: rng.nextFloat(in: 0.4...0.9),
-                              depthCents: rng.nextFloat(in: 8...16),
-                              rng: &rng)
-            let cents = rng.nextFloat(in: -5...5)
-            detuneMul = powf(2.0, cents / 1200.0)
+            targetFreq = freq
+            self.amp = amp
+            glideCoeff = 1.0 - 1.0 / (0.3 * Float(sampleRate))
+            self.h2 = h2
+            self.h3 = h3
         }
 
-        /// Called on each 16th-note boundary. `momentum` is this voice's
-        /// species-specific momentum from other species calling.
-        /// Returns true if this voice started a croak.
-        mutating func onBeat(momentum: Float) -> Bool {
-            if isCalling { return false }
-            let effectiveDensity = density + momentum * 0.25
-            let roll = rng.nextFloat(in: 0.0...1.0)
-            if roll < effectiveDensity {
-                isCalling = true
-                counter = 0
-                currentFreq = Tonality.duskChord.randomTone(in: freqRange, rng: &rng)
-                burstLength = UInt32(rng.nextFloat(in: burstRange.lowerBound * Float(sampleRate)...burstRange.upperBound * Float(sampleRate)))
-                // Randomize this croak's volume — some whisper-quiet, some full
-                croakGain = rng.nextFloat(in: gainRange)
-                return true
-            }
-            return false
-        }
+        mutating func setTarget(_ freq: Float) { targetFreq = freq }
 
         mutating func nextSample() -> Float {
-            if isCalling {
-                counter += 1
-                if counter >= burstLength {
-                    isCalling = false
-                    return 0
-                }
-                let t = Float(counter) / Float(burstLength)
-                let env: Float
-                if t < 0.08 {
-                    env = t / 0.08
-                } else if t < 0.20 {
-                    let d = (t - 0.08) / 0.12
-                    env = 1.0 - d * 0.4
-                } else if t < 0.75 {
-                    env = 0.6
-                } else {
-                    let r = (t - 0.75) / 0.25
-                    env = 0.6 * (1.0 - r)
-                }
-                let vibMul = vibrato.nextMultiplier()
-                phase += (currentFreq * detuneMul * vibMul) / Float(sampleRate)
-                if phase > 1.0 { phase -= 1.0 }
-                let raw = sin(phase * Float.pi * 2.0) * env * maxAmplitude * croakGain
-                return distanceLP.process(bp.process(raw))
-            } else {
-                return 0
-            }
+            currentFreq = currentFreq * glideCoeff + targetFreq * (1.0 - glideCoeff)
+            phase += currentFreq / Float(sampleRate)
+            if phase > 1.0 { phase -= 1.0 }
+            let p = phase * Float.pi * 2.0
+            let osc = sin(p) + sin(p * 2.0) * h2 + sin(p * 3.0) * h3
+            return osc * amp
         }
     }
 
-    init() {
-        // Multiple voices per species at varying "distances" (LP cutoff + gain range).
-        // Bullfrogs: low, slow, boomy — some close, some far
-        // Treefrogs: mid, moderate — the backbone
-        // Peepers:   high, quick, bright — tiny and distant
-        voices = [
-            // Bullfrogs — low and slow
-            FrogVoice(freq: 233.1, amp: 0.035, density: 0.04, kind: .bullfrog,
-                      gainRange: 0.3...1.0, freqRange: 150...350,
-                      burstRange: 0.4...0.7, lpCutoff: 500.0, seed: 601),
-            FrogVoice(freq: 174.6, amp: 0.03, density: 0.03, kind: .bullfrog,
-                      gainRange: 0.15...0.6, freqRange: 150...350,
-                      burstRange: 0.5...0.8, lpCutoff: 350.0, seed: 602),  // far away
+    private let chords: [[Float]]
+    private var tones: [Tone]
+    private var lpA: OnePoleLP
+    private var lpB: OnePoleLP
+    private var chordIndex: Int = 0
+    private var sampleCounter: UInt32 = 0
+    private let changeSamples: UInt32
+    private var volPhase: Double = 0
+    private let volPhaseInc: Double
+    private let volMin: Float
+    private let volRange: Float
 
-            // Treefrogs — mid range
-            FrogVoice(freq: 466.2, amp: 0.028, density: 0.05, kind: .treefrog,
-                      gainRange: 0.25...1.0, freqRange: 400...800,
-                      burstRange: 0.3...0.5, lpCutoff: 700.0, seed: 611),
-            FrogVoice(freq: 554.4, amp: 0.022, density: 0.04, kind: .treefrog,
-                      gainRange: 0.1...0.5, freqRange: 400...800,
-                      burstRange: 0.25...0.45, lpCutoff: 500.0, seed: 612),  // distant
-
-            // Peepers — high, tiny, quick
-            FrogVoice(freq: 698.5, amp: 0.018, density: 0.03, kind: .peeper,
-                      gainRange: 0.2...1.0, freqRange: 800...1400,
-                      burstRange: 0.15...0.3, lpCutoff: 900.0, seed: 621),
-            FrogVoice(freq: 880.0, amp: 0.012, density: 0.02, kind: .peeper,
-                      gainRange: 0.1...0.4, freqRange: 800...1400,
-                      burstRange: 0.12...0.25, lpCutoff: 600.0, seed: 622),  // very far
-        ]
-        drone = ChordDrone()
+    /// - Parameters:
+    ///   - chords: Array of chord voicings, each an array of frequencies.
+    ///   - toneAmps: Per-tone amplitudes (must match chord voice count).
+    ///   - lpCutoff: Low-pass cutoff for the dual filter.
+    ///   - changePeriod: Seconds between chord changes.
+    ///   - breathPeriod: Seconds for one full volume breathing cycle.
+    ///   - volMin: Minimum volume in the breathing cycle.
+    ///   - volRange: Volume swing (volMin + volRange at peak).
+    ///   - h2: 2nd harmonic amplitude coefficient.
+    ///   - h3: 3rd harmonic amplitude coefficient.
+    init(chords: [[Float]], toneAmps: [Float], lpCutoff: Float,
+         changePeriod: Float, breathPeriod: Float,
+         volMin: Float, volRange: Float, h2: Float, h3: Float) {
+        self.chords = chords
+        self.volMin = volMin
+        self.volRange = volRange
+        let initial = chords[0]
+        tones = zip(initial, toneAmps).map { Tone(freq: $0.0, amp: $0.1, h2: h2, h3: h3) }
+        lpA = OnePoleLP(cutoffHz: lpCutoff)
+        lpB = OnePoleLP(cutoffHz: lpCutoff)
+        changeSamples = UInt32(changePeriod * Float(sampleRate))
+        volPhaseInc = Double.pi * 2.0 / (Double(breathPeriod) * Double(sampleRate))
     }
 
     mutating func nextSample() -> Float {
-        // Beat clock — tick all voices on 16th-note boundaries
+        sampleCounter &+= 1
+        if sampleCounter >= changeSamples {
+            sampleCounter = 0
+            chordIndex = (chordIndex + 1) % chords.count
+            let chord = chords[chordIndex]
+            for i in tones.indices { tones[i].setTarget(chord[i]) }
+        }
+        volPhase += volPhaseInc
+        if volPhase > Double.pi * 2.0 { volPhase -= Double.pi * 2.0 }
+        let vol = volMin + volRange * Float(cos(volPhase))
+        var sum: Float = 0
+        for i in tones.indices { sum += tones[i].nextSample() }
+        return lpB.process(lpA.process(sum)) * vol
+    }
+}
+
+// MARK: - Shared: Creature Voice
+
+/// A sine-tone voice with bandpass + distance LP filtering, vibrato, detuning,
+/// per-call gain randomization, and a configurable amplitude envelope.
+/// Used for owls, birds, and frogs.
+struct CreatureVoice {
+    var rng: FastRNG
+    var phase: Float = 0
+    let baseFreq: Float
+    var currentFreq: Float
+    var callLength: UInt32
+    var counter: UInt32 = 0
+    var isActive: Bool = false
+    var bp: Biquad
+    var distanceLP: OnePoleLP
+    let maxAmplitude: Float
+    var callGain: Float = 1.0
+    var vibrato: Vibrato
+    let detuneMul: Float
+    let density: Float
+    /// Species index — voices with the same index share a momentum channel.
+    let species: Int
+    let gainRange: ClosedRange<Float>
+    let freqRange: ClosedRange<Float>
+    let callRange: ClosedRange<Float>
+    let scale: Tonality.Scale
+    let momentumSensitivity: Float
+    let envelope: (Float) -> Float
+
+    init(freq: Float, amp: Float, density: Float, species: Int,
+         gainRange: ClosedRange<Float>, freqRange: ClosedRange<Float>,
+         callRange: ClosedRange<Float>, lpCutoff: Float,
+         vibratoRate: ClosedRange<Float>, vibratoDepth: ClosedRange<Float>,
+         bpQ: Float, scale: Tonality.Scale, momentumSensitivity: Float,
+         envelope: @escaping (Float) -> Float, seed: UInt64) {
+        rng = FastRNG(seed: seed)
+        baseFreq = freq
+        currentFreq = freq
+        maxAmplitude = amp
+        self.density = density
+        self.species = species
+        self.gainRange = gainRange
+        self.freqRange = freqRange
+        self.callRange = callRange
+        self.scale = scale
+        self.momentumSensitivity = momentumSensitivity
+        self.envelope = envelope
+        callLength = UInt32(Float(sampleRate) * 0.6)
+        bp = Biquad.bandPass(freq: freq, q: bpQ)
+        distanceLP = OnePoleLP(cutoffHz: lpCutoff)
+        vibrato = Vibrato(rateHz: rng.nextFloat(in: vibratoRate),
+                          depthCents: rng.nextFloat(in: vibratoDepth),
+                          rng: &rng)
+        let cents = rng.nextFloat(in: -5...5)
+        detuneMul = powf(2.0, cents / 1200.0)
+    }
+
+    mutating func onBeat(momentum: Float) -> Bool {
+        if isActive { return false }
+        let effectiveDensity = density + momentum * momentumSensitivity
+        let roll = rng.nextFloat(in: 0.0...1.0)
+        if roll < effectiveDensity {
+            isActive = true
+            counter = 0
+            currentFreq = scale.randomTone(in: freqRange, rng: &rng)
+            callLength = UInt32(rng.nextFloat(
+                in: callRange.lowerBound * Float(sampleRate)...callRange.upperBound * Float(sampleRate)))
+            callGain = rng.nextFloat(in: gainRange)
+            return true
+        }
+        return false
+    }
+
+    mutating func nextSample() -> Float {
+        guard isActive else { return 0 }
+        counter += 1
+        if counter >= callLength {
+            isActive = false
+            return 0
+        }
+        let t = Float(counter) / Float(callLength)
+        let env = envelope(t)
+        let vibMul = vibrato.nextMultiplier()
+        phase += (currentFreq * detuneMul * vibMul) / Float(sampleRate)
+        if phase > 1.0 { phase -= 1.0 }
+        let raw = sin(phase * Float.pi * 2.0) * env * maxAmplitude * callGain
+        return distanceLP.process(bp.process(raw))
+    }
+}
+
+// MARK: - Shared: Beat Grid
+
+/// Manages a 60 BPM / 16th-note grid with per-species momentum for
+/// call-and-response behavior across creature voices.
+struct BeatGrid {
+    private let sixteenthSamples: UInt32 = UInt32(sampleRate) / 4
+    private var beatClock: UInt32 = 0
+    private var momentum: [Int: Float]
+    private let decayRate: Float
+    private let boostAmount: Float
+
+    init(speciesCount: Int, decayRate: Float, boostAmount: Float) {
+        var m: [Int: Float] = [:]
+        for i in 0..<speciesCount { m[i] = 0 }
+        momentum = m
+        self.decayRate = decayRate
+        self.boostAmount = boostAmount
+    }
+
+    mutating func tick(voices: inout [CreatureVoice]) {
         if beatClock == 0 {
-            // Decay all momentum channels
-            for kind in [FrogKind.bullfrog, .treefrog, .peeper] {
-                momentum[kind, default: 0] *= 0.65
-            }
-            // Each voice reads momentum for its own kind, and if it fires
-            // it boosts the other kinds (call → response across species)
+            for key in momentum.keys { momentum[key]! *= decayRate }
             for i in voices.indices {
-                let kindMomentum = momentum[voices[i].kind, default: 0]
-                if voices[i].onBeat(momentum: kindMomentum) {
-                    for kind in [FrogKind.bullfrog, .treefrog, .peeper] where kind != voices[i].kind {
-                        momentum[kind, default: 0] = min(1.0, momentum[kind, default: 0] + 0.5)
+                let m = momentum[voices[i].species, default: 0]
+                if voices[i].onBeat(momentum: m) {
+                    for key in momentum.keys where key != voices[i].species {
+                        momentum[key] = min(1.0, momentum[key, default: 0] + boostAmount)
                     }
                 }
             }
         }
         beatClock += 1
         if beatClock >= sixteenthSamples { beatClock = 0 }
+    }
+}
+
+// MARK: - Envelope Shapes
+
+/// Reusable envelope functions for creature voices. Each takes t (0…1)
+/// and returns amplitude (0…1).
+enum Envelopes {
+    // ── Owls ──
+
+    /// Slow swell, sustained, gentle quadratic fade — resonant hoot.
+    nonisolated(unsafe) static let deepHoot: (Float) -> Float = { t in
+        if t < 0.15 { return t / 0.15 }
+        if t < 0.65 { return 0.9 }
+        let r = (t - 0.65) / 0.35
+        return 0.9 * (1.0 - r * r)
+    }
+
+    /// Moderate attack, plateau, smooth linear release.
+    nonisolated(unsafe) static let forestCall: (Float) -> Float = { t in
+        if t < 0.10 { return t / 0.10 }
+        if t < 0.60 { return 0.8 }
+        let r = (t - 0.60) / 0.40
+        return 0.8 * (1.0 - r)
+    }
+
+    /// Fast attack, quick exponential decay — brief and distant.
+    nonisolated(unsafe) static let screech: (Float) -> Float = { t in
+        if t < 0.06 { return t / 0.06 }
+        let decayT = (t - 0.06) / 0.94
+        return expf(-2.5 * decayT)
+    }
+
+    // ── Birds ──
+
+    /// Slow attack, sustained plateau, gentle release — warm coo.
+    nonisolated(unsafe) static let doveCoo: (Float) -> Float = { t in
+        if t < 0.15 { return t / 0.15 }
+        if t < 0.70 { return 0.85 }
+        let r = (t - 0.70) / 0.30
+        return 0.85 * (1.0 - r)
+    }
+
+    /// Fast attack, long exponential decay — fairy-chime, Zelda-like.
+    nonisolated(unsafe) static let songbirdChirp: (Float) -> Float = { t in
+        if t < 0.08 { return t / 0.08 }
+        let decayT = (t - 0.08) / 0.92
+        return expf(-1.8 * decayT)
+    }
+
+    /// Very fast attack, quick settle, short plateau, crisp release.
+    nonisolated(unsafe) static let warblerTrill: (Float) -> Float = { t in
+        if t < 0.05 { return t / 0.05 }
+        if t < 0.15 {
+            let d = (t - 0.05) / 0.10
+            return 1.0 - d * 0.35
+        }
+        if t < 0.65 { return 0.65 }
+        let r = (t - 0.65) / 0.35
+        return 0.65 * (1.0 - r)
+    }
+
+    // ── Frogs ──
+
+    /// Fast attack, settle, sustained plateau, smooth release.
+    nonisolated(unsafe) static let frogCroak: (Float) -> Float = { t in
+        if t < 0.08 { return t / 0.08 }
+        if t < 0.20 {
+            let d = (t - 0.08) / 0.12
+            return 1.0 - d * 0.4
+        }
+        if t < 0.75 { return 0.6 }
+        let r = (t - 0.75) / 0.25
+        return 0.6 * (1.0 - r)
+    }
+}
+
+// MARK: - Midnight Forest
+
+/// Flagship night soundscape: dark wind through trees, a D Aeolian chord
+/// drone, and sparse owl-like hoots at varying distances.
+///
+/// Three owl species create emergent call-and-response:
+///   - **Deep owl**   — low, slow, resonant hoots (100-250 Hz)
+///   - **Forest owl** — mid-range, moderate calls (250-500 Hz)
+///   - **Screech**    — high, brief, distant cries (500-900 Hz)
+struct MidnightForest {
+    private var windNoise = BrownNoise()
+    private var windLP = Biquad.lowPass(freq: 400.0, q: 0.6)
+    private var windCutoffLFO = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.06, rangeMin: 150.0, rangeMax: 600.0)
+    private var windAmpLFO = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.05, rangeMin: 0.25, rangeMax: 0.8)
+    private var windCounter: UInt32 = 0
+    private var voices: [CreatureVoice]
+    private var drone: ChordDrone
+    private var beat: BeatGrid
+
+    init() {
+        drone = ChordDrone(
+            chords: [
+                [73.4, 110.0, 146.8],   // D2  A2  D3  — home
+                [73.4, 110.0, 130.8],   // D2  A2  C3  — b7, dark
+                [73.4, 110.0, 174.6],   // D2  A2  F3  — minor 3rd
+                [73.4, 110.0, 146.8],   // D2  A2  D3  — home
+            ],
+            toneAmps: [0.064, 0.048, 0.032],
+            lpCutoff: 350.0, changePeriod: 20.0, breathPeriod: 30.0,
+            volMin: 0.65, volRange: 0.35, h2: 0.5, h3: 0.25
+        )
+
+        let deep = 0, forest = 1, screechSpecies = 2
+        voices = [
+            // Deep owls — low, very sparse, long hoots
+            CreatureVoice(freq: 146.8, amp: 0.14, density: 0.015, species: deep,
+                          gainRange: 0.3...1.0, freqRange: 100...250,
+                          callRange: 0.7...1.2, lpCutoff: 500.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.deepHoot, seed: 701),
+            CreatureVoice(freq: 110.0, amp: 0.10, density: 0.01, species: deep,
+                          gainRange: 0.1...0.5, freqRange: 100...250,
+                          callRange: 0.8...1.4, lpCutoff: 300.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.deepHoot, seed: 702),
+            // Forest owls — mid range
+            CreatureVoice(freq: 293.7, amp: 0.10, density: 0.02, species: forest,
+                          gainRange: 0.2...1.0, freqRange: 250...500,
+                          callRange: 0.4...0.8, lpCutoff: 600.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.forestCall, seed: 711),
+            CreatureVoice(freq: 349.2, amp: 0.07, density: 0.015, species: forest,
+                          gainRange: 0.1...0.4, freqRange: 250...500,
+                          callRange: 0.5...0.9, lpCutoff: 400.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.forestCall, seed: 712),
+            // Screech owls — high, brief, rare
+            CreatureVoice(freq: 587.3, amp: 0.06, density: 0.012, species: screechSpecies,
+                          gainRange: 0.15...0.8, freqRange: 500...900,
+                          callRange: 0.2...0.4, lpCutoff: 800.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.screech, seed: 721),
+            CreatureVoice(freq: 523.3, amp: 0.04, density: 0.008, species: screechSpecies,
+                          gainRange: 0.05...0.3, freqRange: 500...900,
+                          callRange: 0.15...0.35, lpCutoff: 450.0,
+                          vibratoRate: 0.3...0.7, vibratoDepth: 6...12,
+                          bpQ: 1.0, scale: Tonality.nightChord, momentumSensitivity: 0.20,
+                          envelope: Envelopes.screech, seed: 722),
+        ]
+        beat = BeatGrid(speciesCount: 3, decayRate: 0.55, boostAmount: 0.4)
+    }
+
+    mutating func nextSample(natureBalance: Float = 1.0, toneBalance: Float = 1.0, chatterBalance: Float = 1.0) -> Float {
+        beat.tick(voices: &voices)
+
+        // Dark wind — brown noise with wandering cutoff
+        windCounter &+= 1
+        if windCounter % 64 == 0 {
+            let cutoff = windCutoffLFO.nextValue()
+            let q: Float = 0.4 + (cutoff - 150.0) / 900.0
+            windLP.setLowPass(freq: cutoff, q: q)
+        }
+        let wAmp = windCounter % 64 == 0 ? windAmpLFO.nextValue() : windAmpLFO.value
+        let wRaw = windNoise.nextSample()
+        let wind = windLP.process(wRaw) * wAmp * 0.40
+
+        let pad = drone.nextSample()
+
+        var calls: Float = 0
+        for i in voices.indices { calls += voices[i].nextSample() }
+
+        return max(-1.0, min(1.0, wind * natureBalance + pad * toneBalance + calls * chatterBalance))
+    }
+}
+
+// MARK: - Morning Birds
+
+/// Warm sine chirps tuned to G Lydian / Gmaj9 chord tones over a soft
+/// pink-noise forest-air bed and a slow chord drone.
+///
+/// Three species at varying distances create an emergent dawn chorus:
+///   - **Dove**     — low, slow, warm coos (200-450 Hz)
+///   - **Songbird** — mid-range, melodic chirps (400-900 Hz)
+///   - **Warbler**  — high, quick, bright trills (900-1800 Hz)
+struct MorningBirds {
+    private var airNoise = PinkNoise()
+    private var airLPlow = OnePoleLP(cutoffHz: 400.0)
+    private var airLPhigh = OnePoleLP(cutoffHz: 1400.0)
+    private var airAmp = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.06, rangeMin: 0.04, rangeMax: 0.12)
+    private var airCounter: UInt32 = 0
+    private var voices: [CreatureVoice]
+    private var drone: ChordDrone
+    private var beat: BeatGrid
+
+    init() {
+        drone = ChordDrone(
+            chords: [
+                [196.0, 293.7, 392.0],   // G3  D4  G4  — home
+                [196.0, 293.7, 440.0],   // G3  D4  A4  — add9
+                [196.0, 293.7, 493.9],   // G3  D4  B4  — major 3rd
+                [196.0, 293.7, 370.0],   // G3  D4  F#4 — Lydian color
+                [196.0, 293.7, 392.0],   // G3  D4  G4  — home
+            ],
+            toneAmps: [0.032, 0.024, 0.016],
+            lpCutoff: 500.0, changePeriod: 16.0, breathPeriod: 20.0,
+            volMin: 0.75, volRange: 0.25, h2: 0.4, h3: 0.2
+        )
+
+        let dove = 0, songbird = 1, warbler = 2
+        voices = [
+            // Doves — low and slow
+            CreatureVoice(freq: 293.7, amp: 0.12, density: 0.025, species: dove,
+                          gainRange: 0.3...1.0, freqRange: 200...450,
+                          callRange: 0.5...0.9, lpCutoff: 600.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.doveCoo, seed: 111),
+            CreatureVoice(freq: 247.0, amp: 0.10, density: 0.02, species: dove,
+                          gainRange: 0.15...0.5, freqRange: 200...450,
+                          callRange: 0.6...1.0, lpCutoff: 350.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.doveCoo, seed: 112),
+            // Songbirds — mid range, backbone
+            CreatureVoice(freq: 493.9, amp: 0.10, density: 0.045, species: songbird,
+                          gainRange: 0.25...1.0, freqRange: 400...900,
+                          callRange: 0.25...0.5, lpCutoff: 800.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.songbirdChirp, seed: 221),
+            CreatureVoice(freq: 587.3, amp: 0.08, density: 0.035, species: songbird,
+                          gainRange: 0.15...0.6, freqRange: 400...900,
+                          callRange: 0.3...0.55, lpCutoff: 550.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.songbirdChirp, seed: 222),
+            CreatureVoice(freq: 440.0, amp: 0.06, density: 0.03, species: songbird,
+                          gainRange: 0.1...0.4, freqRange: 400...900,
+                          callRange: 0.2...0.45, lpCutoff: 400.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.songbirdChirp, seed: 223),
+            // Warblers — high, quick, bright
+            CreatureVoice(freq: 880.0, amp: 0.072, density: 0.03, species: warbler,
+                          gainRange: 0.2...1.0, freqRange: 900...1800,
+                          callRange: 0.15...0.35, lpCutoff: 900.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.warblerTrill, seed: 331),
+            CreatureVoice(freq: 740.0, amp: 0.048, density: 0.02, species: warbler,
+                          gainRange: 0.1...0.4, freqRange: 900...1800,
+                          callRange: 0.12...0.3, lpCutoff: 500.0,
+                          vibratoRate: 0.8...1.8, vibratoDepth: 6...14,
+                          bpQ: 1.0, scale: Tonality.dayChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.warblerTrill, seed: 332),
+        ]
+        beat = BeatGrid(speciesCount: 3, decayRate: 0.65, boostAmount: 0.5)
+    }
+
+    mutating func nextSample(natureBalance: Float = 1.0, toneBalance: Float = 1.0, chatterBalance: Float = 1.0) -> Float {
+        beat.tick(voices: &voices)
+
+        // Forest air — band-passed pink noise (400-1400 Hz) with slow swell
+        airCounter &+= 1
+        let aAmp = airCounter % 64 == 0 ? airAmp.nextValue() : airAmp.value
+        let aRaw = airNoise.nextSample()
+        let aLow = airLPlow.process(aRaw)
+        let aBand = airLPhigh.process(aRaw - aLow)
+        let air = aBand * aAmp
+
+        let pad = drone.nextSample()
+
+        var chirps: Float = 0
+        for i in voices.indices { chirps += voices[i].nextSample() }
+
+        return max(-1.0, min(1.0, air * natureBalance + pad * toneBalance + chirps * chatterBalance))
+    }
+}
+
+// MARK: - Evening Frogs
+
+/// Gentle warm tones tuned to open Bb major pentatonic voicings with slow
+/// vibrato and long decay. A sine drone adds harmonic warmth underneath.
+///
+/// Three frog species create emergent rhythmic patterns:
+///   - **Bullfrog** — low, slow, resonant (150-350 Hz)
+///   - **Treefrog** — mid-range, moderate (400-800 Hz)
+///   - **Peeper**   — high, quick, bright (800-1400 Hz)
+struct EveningFrogs {
+    private var windNoise = PinkNoise()
+    private var windLPlow = OnePoleLP(cutoffHz: 300.0)
+    private var windLPhigh = OnePoleLP(cutoffHz: 1200.0)
+    private var windAmp = SmoothedRandom(minRateHz: 0.03, maxRateHz: 0.08, rangeMin: 0.032, rangeMax: 0.10)
+    private var windCounter: UInt32 = 0
+    private var voices: [CreatureVoice]
+    private var drone: ChordDrone
+    private var beat: BeatGrid
+
+    init() {
+        drone = ChordDrone(
+            chords: [
+                [116.5, 174.6, 233.1],  // Bb  F  Bb  — home
+                [116.5, 174.6, 261.6],  // Bb  F  C   — add9
+                [116.5, 174.6, 293.7],  // Bb  F  D   — major 3rd
+                [116.5, 174.6, 233.1],  // Bb  F  Bb  — home
+            ],
+            toneAmps: [0.072, 0.056, 0.040],
+            lpCutoff: 400.0, changePeriod: 16.0, breathPeriod: 25.0,
+            volMin: 0.75, volRange: 0.25, h2: 0.5, h3: 0.33
+        )
+
+        let bullfrog = 0, treefrog = 1, peeper = 2
+        voices = [
+            // Bullfrogs — low and slow
+            CreatureVoice(freq: 233.1, amp: 0.14, density: 0.04, species: bullfrog,
+                          gainRange: 0.3...1.0, freqRange: 150...350,
+                          callRange: 0.4...0.7, lpCutoff: 500.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 601),
+            CreatureVoice(freq: 174.6, amp: 0.12, density: 0.03, species: bullfrog,
+                          gainRange: 0.15...0.6, freqRange: 150...350,
+                          callRange: 0.5...0.8, lpCutoff: 350.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 602),
+            // Treefrogs — mid range
+            CreatureVoice(freq: 466.2, amp: 0.112, density: 0.05, species: treefrog,
+                          gainRange: 0.25...1.0, freqRange: 400...800,
+                          callRange: 0.3...0.5, lpCutoff: 700.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 611),
+            CreatureVoice(freq: 554.4, amp: 0.088, density: 0.04, species: treefrog,
+                          gainRange: 0.1...0.5, freqRange: 400...800,
+                          callRange: 0.25...0.45, lpCutoff: 500.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 612),
+            // Peepers — high, tiny, quick
+            CreatureVoice(freq: 698.5, amp: 0.072, density: 0.03, species: peeper,
+                          gainRange: 0.2...1.0, freqRange: 800...1400,
+                          callRange: 0.15...0.3, lpCutoff: 900.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 621),
+            CreatureVoice(freq: 880.0, amp: 0.048, density: 0.02, species: peeper,
+                          gainRange: 0.1...0.4, freqRange: 800...1400,
+                          callRange: 0.12...0.25, lpCutoff: 600.0,
+                          vibratoRate: 0.4...0.9, vibratoDepth: 8...16,
+                          bpQ: 1.2, scale: Tonality.duskChord, momentumSensitivity: 0.25,
+                          envelope: Envelopes.frogCroak, seed: 622),
+        ]
+        beat = BeatGrid(speciesCount: 3, decayRate: 0.65, boostAmount: 0.5)
+    }
+
+    mutating func nextSample(natureBalance: Float = 1.0, toneBalance: Float = 1.0, chatterBalance: Float = 1.0) -> Float {
+        beat.tick(voices: &voices)
 
         // Gentle breeze — band-passed pink noise (300-1200Hz) with slow swell
         windCounter &+= 1
         let wAmp = windCounter % 64 == 0 ? windAmp.nextValue() : windAmp.value
         let wRaw = windNoise.nextSample()
         let wLow = windLPlow.process(wRaw)
-        let wBand = windLPhigh.process(wRaw - wLow)  // HP at 300, LP at 1200
+        let wBand = windLPhigh.process(wRaw - wLow)
         let wind = wBand * wAmp
 
         let pad = drone.nextSample()
 
         var calls: Float = 0
-        for i in voices.indices {
-            calls += voices[i].nextSample()
-        }
+        for i in voices.indices { calls += voices[i].nextSample() }
 
-        return max(-1.0, min(1.0, wind + pad + calls))
-    }
-}
-
-// MARK: - Twilight Wind
-
-/// Like NightWind but warmer: lower cutoff range, deeper amplitude modulation,
-/// slower LFO rates. A deep, enveloping evening breeze.
-struct TwilightWind {
-    private var noise = WhiteNoise()
-    private var filter = Biquad.lowPass(freq: 400.0, q: 0.7)
-    private var cutoffLFO = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.06, rangeMin: 150.0, rangeMax: 600.0)
-    private var ampLFO = SmoothedRandom(minRateHz: 0.02, maxRateHz: 0.06, rangeMin: 0.15, rangeMax: 1.0)
-    private var sampleCounter: UInt32 = 0
-
-    mutating func nextSample() -> Float {
-        sampleCounter &+= 1
-
-        if sampleCounter % 64 == 0 {
-            let cutoff = cutoffLFO.nextValue()
-            let q: Float = 0.5 + (cutoff - 150.0) / 900.0
-            filter.setLowPass(freq: cutoff, q: q)
-        }
-
-        let amp: Float = sampleCounter % 64 == 0 ? ampLFO.nextValue() : ampLFO.value
-
-        let raw = noise.nextSample()
-        let filtered = filter.process(raw)
-        return max(-1.0, min(1.0, filtered * amp * 0.8 * 0.10))
+        return max(-1.0, min(1.0, wind * natureBalance + pad * toneBalance + calls * chatterBalance))
     }
 }
 
 // MARK: - Procedural Generator
 
-/// Class wrapper for generators. Reference semantics means no copying on every sample.
-/// The generator structs mutate in-place through the class indirection.
+/// Class wrapper that eliminates per-sample struct copying. Each generator
+/// is captured by reference inside a closure, mutated in place at 44.1 kHz.
 final class ProceduralGenerator {
-    private enum Kind {
-        case oceanSurf(OceanSurf)
-        case warmRain(WarmRain)
-        case creekBrook(CreekBrook)
-        case nightWind(NightWind)
-        case morningBirds(MorningBirds)
-        case forestCanopy(ForestCanopy)
-        case meadowBreeze(MeadowBreeze)
-        case crickets(Crickets)
-        case eveningFrogs(EveningFrogs)
-        case twilightWind(TwilightWind)
-    }
+    private let render: (Float, Float, Float) -> Float
 
-    private var kind: Kind
+    /// Layer balance values (0…1). Set from the mixer before each render pass.
+    var natureBalance: Float = 1.0
+    var toneBalance: Float = 1.0
+    var chatterBalance: Float = 1.0
 
-    private init(kind: Kind) {
-        self.kind = kind
+    private init(_ render: @escaping (Float, Float, Float) -> Float) {
+        self.render = render
     }
 
     static func create(id: String) -> ProceduralGenerator? {
         switch id {
-        case "ocean-surf": return ProceduralGenerator(kind: .oceanSurf(OceanSurf()))
-        case "warm-rain": return ProceduralGenerator(kind: .warmRain(WarmRain()))
-        case "creek": return ProceduralGenerator(kind: .creekBrook(CreekBrook()))
-        case "night-wind": return ProceduralGenerator(kind: .nightWind(NightWind()))
-        case "morning-birds": return ProceduralGenerator(kind: .morningBirds(MorningBirds()))
-        case "forest-canopy": return ProceduralGenerator(kind: .forestCanopy(ForestCanopy()))
-        case "meadow-breeze": return ProceduralGenerator(kind: .meadowBreeze(MeadowBreeze()))
-        case "crickets": return ProceduralGenerator(kind: .crickets(Crickets()))
-        case "evening-frogs": return ProceduralGenerator(kind: .eveningFrogs(EveningFrogs()))
-        case "twilight-wind": return ProceduralGenerator(kind: .twilightWind(TwilightWind()))
-        default: return nil
+        case "midnight-forest":
+            var gen = MidnightForest()
+            return ProceduralGenerator { gen.nextSample(natureBalance: $0, toneBalance: $1, chatterBalance: $2) }
+        case "morning-birds":
+            var gen = MorningBirds()
+            return ProceduralGenerator { gen.nextSample(natureBalance: $0, toneBalance: $1, chatterBalance: $2) }
+        case "evening-frogs":
+            var gen = EveningFrogs()
+            return ProceduralGenerator { gen.nextSample(natureBalance: $0, toneBalance: $1, chatterBalance: $2) }
+        default:
+            return nil
         }
     }
 
     func nextSample() -> Float {
-        switch kind {
-        case .oceanSurf(var gen):
-            let s = gen.nextSample()
-            kind = .oceanSurf(gen)
-            return s
-        case .warmRain(var gen):
-            let s = gen.nextSample()
-            kind = .warmRain(gen)
-            return s
-        case .creekBrook(var gen):
-            let s = gen.nextSample()
-            kind = .creekBrook(gen)
-            return s
-        case .nightWind(var gen):
-            let s = gen.nextSample()
-            kind = .nightWind(gen)
-            return s
-        case .morningBirds(var gen):
-            let s = gen.nextSample()
-            kind = .morningBirds(gen)
-            return s
-        case .forestCanopy(var gen):
-            let s = gen.nextSample()
-            kind = .forestCanopy(gen)
-            return s
-        case .meadowBreeze(var gen):
-            let s = gen.nextSample()
-            kind = .meadowBreeze(gen)
-            return s
-        case .crickets(var gen):
-            let s = gen.nextSample()
-            kind = .crickets(gen)
-            return s
-        case .eveningFrogs(var gen):
-            let s = gen.nextSample()
-            kind = .eveningFrogs(gen)
-            return s
-        case .twilightWind(var gen):
-            let s = gen.nextSample()
-            kind = .twilightWind(gen)
-            return s
-        }
+        render(natureBalance, toneBalance, chatterBalance)
     }
 }

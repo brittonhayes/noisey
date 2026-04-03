@@ -2,8 +2,6 @@ import SwiftUI
 
 struct MoonVolumeView: View {
     @Environment(NoiseyStore.self) private var store
-    @State private var dragOffset: CGFloat = 0
-    @State private var showHint = false
     private let moonSize: CGFloat = 180
 
     var body: some View {
@@ -13,8 +11,8 @@ struct MoonVolumeView: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(red: 0.72, green: 0.78, blue: 1.0).opacity(Double(store.masterVolume) * 0.22),
-                            Color(red: 0.55, green: 0.60, blue: 0.95).opacity(Double(store.masterVolume) * 0.06),
+                            Color(red: 0.72, green: 0.78, blue: 1.0).opacity(0.22),
+                            Color(red: 0.55, green: 0.60, blue: 0.95).opacity(0.06),
                             .clear
                         ],
                         center: .center,
@@ -24,12 +22,6 @@ struct MoonVolumeView: View {
                 )
                 .frame(width: moonSize * 2.5, height: moonSize * 2.5)
                 .blur(radius: 30)
-
-            // Volume hint
-            Text("\(Int(store.masterVolume * 100))")
-                .font(.system(size: 96, weight: .ultraLight, design: .rounded))
-                .foregroundStyle(.white.opacity(showHint ? 0.15 : 0))
-                .animation(.easeOut(duration: 0.3), value: showHint)
 
             // Moon disc
             Circle()
@@ -66,25 +58,7 @@ struct MoonVolumeView: View {
                     .frame(width: moonSize, height: moonSize)
                 }
         }
-        .gesture(
-            DragGesture(minimumDistance: 5)
-                .onChanged { value in
-                    store.isDraggingVolume = true
-                    showHint = true
-                    let delta = Float(-value.translation.height / 300)
-                    let prev = Float(dragOffset / 300)
-                    let newVolume = max(0, min(1, store.masterVolume + delta + prev))
-                    dragOffset = value.translation.height
-                    store.setVolume(newVolume)
-                }
-                .onEnded { _ in
-                    dragOffset = 0
-                    store.isDraggingVolume = false
-                    withAnimation(.easeOut(duration: 0.8)) {
-                        showHint = false
-                    }
-                }
-        )
+        .skyDrag()
         .shadow(
             color: store.isPlaying ? Color(red: 0.72, green: 0.78, blue: 1.0).opacity(0.14) : .clear,
             radius: store.isPlaying ? 40 : 0

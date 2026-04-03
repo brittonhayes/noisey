@@ -139,7 +139,3 @@ struct ScheduleView: View {
         Calendar.current.date(from: DateComponents(hour: hour, minute: minute)) ?? .now
     }
 }
-
-private func dateFrom(hour: Int, minute: Int) -> Date {
-    Calendar.current.date(from: DateComponents(hour: hour, minute: minute)) ?? .now
-}

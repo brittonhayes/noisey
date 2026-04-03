@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum World: String, CaseIterable, Codable, Sendable {
-    case night, day, dusk
+    case night, dusk, day
 }
 
 struct WorldConfig {
@@ -37,8 +37,8 @@ struct WorldConfig {
                 backgroundGradientTop: Color(red: 0.06, green: 0.04, blue: 0.16),
                 backgroundGradientBottom: Color(red: 0.02, green: 0.02, blue: 0.06),
                 accentColor: Color(red: 0.72, green: 0.78, blue: 1.0),
-                soundIDs: ["ocean-surf", "warm-rain", "creek", "night-wind"],
-                defaultSoundID: "ocean-surf",
+                soundIDs: ["midnight-forest"],
+                defaultSoundID: "midnight-forest",
                 skyObjectType: .moon
             )
         case .day:
@@ -49,7 +49,7 @@ struct WorldConfig {
                 backgroundGradientTop: Color(red: 0.45, green: 0.65, blue: 0.88),
                 backgroundGradientBottom: Color(red: 0.70, green: 0.82, blue: 0.92),
                 accentColor: Color(red: 1.0, green: 0.84, blue: 0.40),
-                soundIDs: ["morning-birds", "forest-canopy", "meadow-breeze"],
+                soundIDs: ["morning-birds"],
                 defaultSoundID: "morning-birds",
                 skyObjectType: .sun
             )
@@ -61,8 +61,8 @@ struct WorldConfig {
                 backgroundGradientTop: Color(red: 0.04, green: 0.10, blue: 0.08),
                 backgroundGradientBottom: Color(red: 0.02, green: 0.05, blue: 0.04),
                 accentColor: Color(red: 1.0, green: 0.62, blue: 0.44),
-                soundIDs: ["crickets", "evening-frogs", "twilight-wind"],
-                defaultSoundID: "crickets",
+                soundIDs: ["evening-frogs"],
+                defaultSoundID: "evening-frogs",
                 skyObjectType: .firefly
             )
         }

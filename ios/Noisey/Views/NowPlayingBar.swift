@@ -19,24 +19,12 @@ struct NowPlayingBar: View {
                 showingSounds = true
             } label: {
                 Image(systemName: "slider.vertical.3")
-                    .font(.title3)
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(iconColor)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 52, height: 52)
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular)
-
-            Spacer()
-
-            // Now playing label
-            if let sound = store.activeSound {
-                Text(sound.name)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(isLight ? .black.opacity(0.5) : .secondary)
-                    .transition(.opacity)
-            }
-
-            Spacer()
+            .glassEffect(.regular, in: .circle)
 
             // Play/pause button
             Button {
@@ -47,15 +35,21 @@ struct NowPlayingBar: View {
                 }
             } label: {
                 Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .foregroundStyle(store.isPlaying ? (isLight ? .white : .black) : iconColor)
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(store.isPlaying ? .primary : iconColor)
+                    .frame(width: 52, height: 52)
             }
             .buttonStyle(.plain)
-            .background(store.isPlaying ? (isLight ? .black : .white) : .clear, in: Circle())
-            .glassEffect(store.isPlaying ? .regular.tint(isLight ? .black : .white) : .regular, in: Circle())
+            .glassEffect(
+                store.isPlaying
+                    ? .regular.tint(store.currentWorldConfig.accentColor.opacity(0.35))
+                    : .regular,
+                in: .circle
+            )
         }
         .padding(.horizontal, 24)
         .animation(.easeInOut(duration: 0.2), value: store.isPlaying)
+        .animation(.easeInOut(duration: 0.2), value: store.currentWorld)
     }
+
 }

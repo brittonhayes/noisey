@@ -6,7 +6,7 @@ struct NoiseyApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            WorldSwitcherView()
                 .environment(store)
         }
     }

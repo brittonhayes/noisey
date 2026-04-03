@@ -40,16 +40,9 @@ struct SoundCardView: View {
 
     private func icon(for sound: SoundEntry) -> String {
         switch sound.id {
-        case "ocean-surf": return "water.waves"
-        case "warm-rain": return "cloud.rain"
-        case "creek": return "drop.triangle"
-        case "night-wind": return "wind"
+        case "midnight-forest": return "moon.stars"
         case "morning-birds": return "bird"
-        case "forest-canopy": return "tree"
-        case "meadow-breeze": return "leaf"
-        case "crickets": return "ant"
         case "evening-frogs": return "lizard"
-        case "twilight-wind": return "wind"
         default: return sound.category == .custom ? "waveform" : "speaker.wave.2"
         }
     }

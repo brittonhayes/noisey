@@ -1,22 +1,19 @@
-import AVKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SoundGridView: View {
     @Environment(NoiseyStore.self) private var store
-    @State private var showingUpload = false
-
-    private let columns = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8),
-    ]
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
-                    // Sound grid
-                    soundsSection
+                    // Environment
+                    environmentSection
+
+                    sectionDivider
+
+                    // Layer balance
+                    balanceSection
 
                     sectionDivider
 
@@ -51,55 +48,19 @@ struct SoundGridView: View {
             .padding(.horizontal, 4)
     }
 
-    private var soundsSection: some View {
+    private var balanceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader(store.currentWorldConfig.displayName.lowercased())
+            sectionHeader("balance")
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(store.currentWorldSounds) { sound in
-                    SoundCardView(
-                        sound: sound,
-                        isActive: sound.active,
-                        onTap: {
-                            store.toggleSound(id: sound.id)
-                        },
-                        onDelete: sound.category == .custom ? {
-                            store.deleteSound(id: sound.id)
-                        } : nil
-                    )
+            VStack(spacing: 12) {
+                BalanceSlider(label: "nature", icon: "leaf.fill", value: store.natureBalance) {
+                    store.setBalance(.nature, to: $0)
                 }
-
-                // Upload button — ghost glass to match the grid
-                Button {
-                    showingUpload = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                            .font(.footnote)
-                            .foregroundStyle(.tertiary)
-                        Text("upload")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .glassEffect(.regular.interactive(true))
-                    .opacity(0.5)
+                BalanceSlider(label: "tone", icon: "waveform.path", value: store.toneBalance) {
+                    store.setBalance(.tone, to: $0)
                 }
-                .buttonStyle(.plain)
-                .fileImporter(
-                    isPresented: $showingUpload,
-                    allowedContentTypes: [.audio, .wav, .mp3, .aiff],
-                    allowsMultipleSelection: false
-                ) { result in
-                    guard case .success(let urls) = result, let url = urls.first else { return }
-                    guard url.startAccessingSecurityScopedResource() else { return }
-                    defer { url.stopAccessingSecurityScopedResource() }
-                    store.uploadSound(
-                        fileURL: url,
-                        name: url.deletingPathExtension().lastPathComponent
-                    )
+                BalanceSlider(label: "chatter", icon: "bird.fill", value: store.chatterBalance) {
+                    store.setBalance(.chatter, to: $0)
                 }
             }
         }
@@ -123,6 +84,49 @@ struct SoundGridView: View {
         }
     }
 
+    private var environmentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("environment")
+
+            HStack(spacing: 8) {
+                ForEach(World.allCases, id: \.self) { world in
+                    let config = WorldConfig.config(for: world)
+                    let isActive = world == store.currentWorld
+
+                    Button {
+                        guard !isActive else { return }
+                        store.switchWorld(to: world)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: environmentIcon(for: config.skyObjectType))
+                                .font(.system(size: 22, weight: .medium))
+
+                            Text(config.displayName.lowercased())
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(isActive ? .primary : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(
+                        isActive
+                            ? .regular.tint(config.accentColor.opacity(0.25))
+                            : .regular
+                    )
+                }
+            }
+        }
+    }
+
+    private func environmentIcon(for type: WorldConfig.SkyObjectType) -> String {
+        switch type {
+        case .moon: return "moon.fill"
+        case .sun: return "sun.max.fill"
+        case .firefly: return "sparkles"
+        }
+    }
+
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
@@ -132,15 +136,3 @@ struct SoundGridView: View {
     }
 }
 
-// MARK: - AVRoutePickerView Wrapper
-
-struct RoutePickerView: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let picker = AVRoutePickerView()
-        picker.tintColor = .white
-        picker.activeTintColor = .systemBlue
-        return picker
-    }
-
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
-}

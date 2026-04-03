@@ -9,8 +9,8 @@ private let fadeInSamples: Int = 66150
 /// Fade-out duration in samples (~0.5s at 44100Hz).
 private let fadeOutSamples: Int = 22050
 
-/// Hardcoded warmth level (40%).
-private let warmth: Float = 0.4
+/// Hardcoded warmth level (20%) — light warmth, preserves presence on small speakers.
+private let warmth: Float = 0.2
 
 /// Crossfade duration in samples (~4s at 44100Hz) for seamless file looping.
 let crossfadeSamples: Int = Int(sampleRate) * 4
@@ -80,6 +80,11 @@ final class MixerState: @unchecked Sendable {
     private var warmthFilterL: Biquad
     private var warmthFilterR: Biquad
 
+    /// Layer balance values (0…1). Written from main thread under lock, read on audio thread.
+    private var _natureBalance: Float = 1.0
+    private var _toneBalance: Float = 1.0
+    private var _chatterBalance: Float = 1.0
+
     /// Smoothed RMS level from the render callback (0…1). Written on audio thread, read on main.
     private(set) var rmsLevel: Float = 0
 
@@ -99,6 +104,14 @@ final class MixerState: @unchecked Sendable {
 
     func setMasterVolume(_ vol: Float) {
         lock.withLock { masterVolume.set(vol) }
+    }
+
+    func setLayerBalances(nature: Float, tone: Float, chatter: Float) {
+        lock.withLock {
+            _natureBalance = nature
+            _toneBalance = tone
+            _chatterBalance = chatter
+        }
     }
 
     func play(id: String, sound: ActiveSound) {
@@ -145,6 +158,13 @@ final class MixerState: @unchecked Sendable {
             }
 
             for (_, active) in sounds {
+                // Propagate layer balances to the generator before rendering
+                if let gen = active.generator {
+                    gen.natureBalance = _natureBalance
+                    gen.toneBalance = _toneBalance
+                    gen.chatterBalance = _chatterBalance
+                }
+
                 active.fillMono(&monoBuf, count: frameCount)
 
                 for i in 0..<frameCount {
@@ -309,6 +329,10 @@ final class AudioEngine: @unchecked Sendable {
 
     func setMasterVolume(_ volume: Float) {
         mixer.setMasterVolume(volume)
+    }
+
+    func setLayerBalances(nature: Float, tone: Float, chatter: Float) {
+        mixer.setLayerBalances(nature: nature, tone: tone, chatter: chatter)
     }
 
     func isPlaying(id: String) -> Bool {

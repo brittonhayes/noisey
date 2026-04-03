@@ -73,6 +73,9 @@ enum Tonality {
     // Bb Dorian: Bb C Db Eb F G Ab
     static let dusk = Scale(root: 34, intervals: [0, 2, 3, 5, 7, 9, 10])
 
+    // D minor pentatonic chord tones: D F G A C — dark, zero tension
+    static let nightChord = Scale(root: 26, intervals: [0, 3, 5, 7, 10])
+
     // Bb major pentatonic chord tones: Bb C D F G — warm, zero tension
     static let duskChord = Scale(root: 34, intervals: [0, 2, 4, 7, 9])
 }
