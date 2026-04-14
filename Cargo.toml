@@ -15,7 +15,7 @@ axum = { version = "0.8", features = ["multipart"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 cpal = "0.15"
 symphonia = { version = "0.5", features = ["aac", "alac", "mp3", "ogg", "wav", "pcm", "isomp4"] }
 rust-embed = "8"
